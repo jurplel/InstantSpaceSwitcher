@@ -1,5 +1,5 @@
 import Foundation
 
 enum Constants {
-    static let appName = "InstantSpaceSwitcher"
+  static let appName = "InstantSpaceSwitcher"
 }
