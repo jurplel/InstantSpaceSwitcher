@@ -99,13 +99,7 @@ struct HotkeyCombination: Codable, Equatable {
 
   static func from(event: NSEvent) -> HotkeyCombination? {
     let modifiers = event.modifierFlags.carbonMask
-    print(
-      "[HotkeyCombination] from(event) - modifierFlags: \(event.modifierFlags), carbonMask: \(modifiers)"
-    )
-    guard modifiers != 0 else {
-      print("[HotkeyCombination] No modifiers detected")
-      return nil
-    }
+    guard modifiers != 0 else { return nil }
 
     let keyCode = UInt32(event.keyCode)
     if let special = event.specialKey, let symbol = arrowSymbol(for: special) {

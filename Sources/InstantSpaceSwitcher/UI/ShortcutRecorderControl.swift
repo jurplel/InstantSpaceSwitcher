@@ -45,7 +45,6 @@ final class ShortcutRecorderControl: NSView {
         self?.handleKeyEvent(event)
       },
       onMouseClick: { [weak self] in
-        print("[ShortcutRecorder] Mouse click detected - cancelling recording")
         self?.isRecording = false
       }
     )
@@ -56,13 +55,8 @@ final class ShortcutRecorderControl: NSView {
   }
 
   private func handleKeyEvent(_ event: NSEvent) {
-    print(
-      "[ShortcutRecorder] Event tap captured - keyCode: \(event.keyCode), modifiers: \(event.modifierFlags)"
-    )
-
     // Ignore additional key presses after first key
     guard !keyPressed else {
-      print("[ShortcutRecorder] Already captured a key, ignoring")
       NSSound.beep()
       return
     }
@@ -71,7 +65,6 @@ final class ShortcutRecorderControl: NSView {
 
     // Handle escape
     if event.keyCode == UInt16(kVK_Escape) {
-      print("[ShortcutRecorder] Escape - cancelling")
       isRecording = false
       onRecordingCancelled?()
       return
@@ -79,13 +72,11 @@ final class ShortcutRecorderControl: NSView {
 
     // Try to create combination
     guard let combination = HotkeyCombination.from(event: event), combination.isValid else {
-      print("[ShortcutRecorder] Invalid combination")
       NSSound.beep()
       keyPressed = false
       return
     }
 
-    print("[ShortcutRecorder] Valid combination: \(combination.displayString)")
     isRecording = false
     onRecordingComplete?(combination)
     // Hotkeys will be re-registered when store updates
@@ -128,23 +119,18 @@ final class ShortcutRecorderControl: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
-    print("[ShortcutRecorder] mouseDown triggered")
-
     // Check accessibility permissions before starting recording
     if !AXIsProcessTrusted() {
-      print("[ShortcutRecorder] Accessibility permission not granted")
       showAccessibilityAlert()
       return
     }
 
     // Stop any other active recorder
     if let activeRecorder = Self.activeRecorder, activeRecorder !== self {
-      print("[ShortcutRecorder] Stopping other active recorder")
       activeRecorder.isRecording = false
     }
 
     if !isRecording {
-      print("[ShortcutRecorder] Starting recording")
       isRecording = true
     }
   }

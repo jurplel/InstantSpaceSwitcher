@@ -49,7 +49,6 @@ final class GlobalEventTapRecorder {
         userInfo: Unmanaged.passUnretained(self).toOpaque()
       )
     else {
-      print("[GlobalEventTap] Failed to create event tap")
       return
     }
 
@@ -58,8 +57,6 @@ final class GlobalEventTapRecorder {
     runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
     CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
     CGEvent.tapEnable(tap: eventTap, enable: true)
-
-    print("[GlobalEventTap] Started recording")
   }
 
   func stopRecording() {
@@ -76,6 +73,5 @@ final class GlobalEventTapRecorder {
 
     onKeyPress = nil
     onMouseClick = nil
-    print("[GlobalEventTap] Stopped recording")
   }
 }
