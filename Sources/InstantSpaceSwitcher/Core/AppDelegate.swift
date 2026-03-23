@@ -271,9 +271,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      guard let self else { return }
-      self.refreshSpaceInfo()
-      self.menuBarController.scheduleRefresh(after: 0.2)
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        self.refreshSpaceInfo()
+        self.menuBarController.scheduleRefresh(after: 0.2)
+      }
     }
   }
 
@@ -291,7 +293,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       object: nil,
       queue: .main
     ) { [weak self] _ in
-      self?.menuBarController.scheduleRefresh(after: 0.1)
+      Task { @MainActor [weak self] in
+        self?.menuBarController.scheduleRefresh(after: 0.1)
+      }
     }
   }
 
