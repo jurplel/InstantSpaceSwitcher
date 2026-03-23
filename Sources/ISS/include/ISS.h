@@ -70,4 +70,16 @@ bool iss_switch_to_index(unsigned int targetIndex);
  */
 void iss_set_swipe_override(bool enabled);
 
+/**
+ * @brief Callback invoked after a swipe-override switch succeeds.
+ * @param targetIndex Zero-based index of the space that was switched to.
+ */
+typedef void (*ISSSwipeHandler)(unsigned int targetIndex);
+
+/**
+ * @brief Registers a handler called after each successful swipe-override switch.
+ * @param handler Function pointer, or NULL to clear.
+ */
+void iss_set_swipe_handler(ISSSwipeHandler handler);
+
 #endif /* ISS_h */

@@ -66,6 +66,8 @@ static bool swipeFired = false;
 // Incremented by iss_post_switch_gesture, decremented by the callback.
 static int passthrough_count = 0;
 
+static ISSSwipeHandler swipeHandler = NULL;
+
 static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             CGSSpaceID activeSpace,
                                             bool hasActiveSpace,
@@ -74,6 +76,28 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
 static bool iss_post_switch_gesture(ISSDirection direction);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
+
+// Perform a swipe-override switch: get space info, compute target, switch,
+// and notify the handler with the target index.
+static void swipe_override_switch(ISSDirection dir) {
+    ISSSpaceInfo info;
+    if (!iss_get_space_info(&info)) {
+        iss_post_switch_gesture(dir);
+        return;
+    }
+
+    unsigned int target;
+    if (dir == ISSDirectionLeft) {
+        target = info.currentIndex > 0 ? info.currentIndex - 1 : info.currentIndex;
+    } else {
+        target = info.currentIndex + 1 < info.spaceCount
+            ? info.currentIndex + 1 : info.currentIndex;
+    }
+
+    if (iss_switch_with_info(&info, dir) && swipeHandler) {
+        swipeHandler(target);
+    }
+}
 
 static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                                    CGEventRef event, void *refcon) {
@@ -126,7 +150,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                     ISSDirection dir =
                         progress > 0 ? ISSDirectionRight : ISSDirectionLeft;
                     swipeFired = true;
-                    iss_switch(dir);
+                    swipe_override_switch(dir);
                 }
             }
             return NULL;
@@ -140,7 +164,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                 if (velocity != 0.0) {
                     ISSDirection dir =
                         velocity > 0 ? ISSDirectionRight : ISSDirectionLeft;
-                    iss_switch(dir);
+                    swipe_override_switch(dir);
                 }
             }
             swipeTracking = false;
@@ -551,4 +575,8 @@ void iss_set_swipe_override(bool enabled) {
         swipeTracking = false;
         swipeFired = false;
     }
+}
+
+void iss_set_swipe_handler(ISSSwipeHandler handler) {
+    swipeHandler = handler;
 }

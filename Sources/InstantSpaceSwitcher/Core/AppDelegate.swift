@@ -23,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       iss_set_swipe_override(true)
     }
 
+    iss_set_swipe_handler { targetIndex in
+      DispatchQueue.main.async {
+        OSDWindow.shared.show(message: "\(targetIndex + 1)")
+      }
+    }
+
     setupMainMenu()
     menuBarController.delegate = self
     menuBarController.setup()
