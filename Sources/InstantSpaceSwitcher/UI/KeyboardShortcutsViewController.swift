@@ -120,6 +120,9 @@ final class KeyboardShortcutsViewController: NSViewController {
       ShortcutRow(
         identifier: .space10, name: "Switch to space 10", combination: store.space10Hotkey,
         isEnabled: store.isEnabled(.space10)),
+      ShortcutRow(
+        identifier: .lastSpace, name: "Switch to Last Used Space", combination: store.spaceLastSpaceHotkey,
+        isEnabled: store.isEnabled(.lastSpace))
     ]
     tableView.reloadData()
   }
@@ -148,6 +151,8 @@ final class KeyboardShortcutsViewController: NSViewController {
     store.$space9Hotkey.receive(on: RunLoop.main).sink { [weak self] _ in self?.loadShortcuts() }
       .store(in: &cancellables)
     store.$space10Hotkey.receive(on: RunLoop.main).sink { [weak self] _ in self?.loadShortcuts() }
+      .store(in: &cancellables)
+    store.$spaceLastSpaceHotkey.receive(on: RunLoop.main).sink { [weak self] _ in self?.loadShortcuts() }
       .store(in: &cancellables)
   }
 }
@@ -253,6 +258,7 @@ extension KeyboardShortcutsViewController: NSTableViewDelegate {
     case .space8: defaultCombination = .defaultForSpace(8)
     case .space9: defaultCombination = .defaultForSpace(9)
     case .space10: defaultCombination = .defaultForSpace(10)
+    case .lastSpace: defaultCombination = .defaultLastSpace
     }
     store.update(defaultCombination, for: identifier)
   }

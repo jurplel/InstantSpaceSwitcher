@@ -281,6 +281,8 @@ final class HotkeyPreferencesView: NSView {
       store.update(.defaultForSpace(9), for: .space9)
     case .space10:
       store.update(.defaultForSpace(10), for: .space10)
+    case .lastSpace:
+      store.update(.defaultLastSpace, for: .lastSpace)
     }
     setStatus("Reset \(identifier.displayName) shortcut.", color: .labelColor)
   }
@@ -313,6 +315,7 @@ extension HotkeyIdentifier {
     case .space8: return "Space 8"
     case .space9: return "Space 9"
     case .space10: return "Space 10"
+    case .lastSpace: return "Switch to Last Used Space"
     }
   }
 

@@ -40,6 +40,13 @@ struct HotkeyCombination: Codable, Equatable {
     keyEquivalent: HotkeyCombination.arrowKeyEquivalent(.rightArrow)
   )
 
+  static let defaultLastSpace = HotkeyCombination(
+    keyCode: UInt32(kVK_ANSI_KeypadPlus),
+    modifiers: HotkeyCombination.defaultModifierMask,
+    displayKey: "↩",
+    keyEquivalent: "-" 
+  )
+
   static func defaultForSpace(_ number: Int) -> HotkeyCombination {
     let keyCode: UInt32
     let displayKey: String
@@ -168,6 +175,7 @@ enum HotkeyIdentifier: String, CaseIterable {
   case right
   case space1, space2, space3, space4, space5
   case space6, space7, space8, space9, space10
+  case lastSpace
 }
 
 final class HotkeyStore: ObservableObject {
@@ -185,6 +193,7 @@ final class HotkeyStore: ObservableObject {
   @Published private(set) var space8Hotkey: HotkeyCombination
   @Published private(set) var space9Hotkey: HotkeyCombination
   @Published private(set) var space10Hotkey: HotkeyCombination
+  @Published private(set) var spaceLastSpaceHotkey: HotkeyCombination
   @Published private(set) var enabledStates: [HotkeyIdentifier: Bool] = [:]
 
   private let defaults: UserDefaults
@@ -203,6 +212,7 @@ final class HotkeyStore: ObservableObject {
     space8Hotkey = defaults.hotkey(forKey: DefaultsKey.space8.rawValue) ?? .defaultForSpace(8)
     space9Hotkey = defaults.hotkey(forKey: DefaultsKey.space9.rawValue) ?? .defaultForSpace(9)
     space10Hotkey = defaults.hotkey(forKey: DefaultsKey.space10.rawValue) ?? .defaultForSpace(10)
+    spaceLastSpaceHotkey = defaults.hotkey(forKey: DefaultsKey.lastSpace.rawValue) ?? .defaultLastSpace
 
     for identifier in HotkeyIdentifier.allCases {
       let key = "enabled.\(identifier.rawValue)"
@@ -260,6 +270,10 @@ final class HotkeyStore: ObservableObject {
       guard combination != space10Hotkey else { return }
       space10Hotkey = combination
       defaults.setHotkey(combination, forKey: DefaultsKey.space10.rawValue)
+    case .lastSpace:
+      guard combination != spaceLastSpaceHotkey else { return }
+      spaceLastSpaceHotkey = combination
+      defaults.setHotkey(combination, forKey: DefaultsKey.lastSpace.rawValue)
     }
   }
 
@@ -276,6 +290,7 @@ final class HotkeyStore: ObservableObject {
     space8Hotkey = .defaultForSpace(8)
     space9Hotkey = .defaultForSpace(9)
     space10Hotkey = .defaultForSpace(10)
+    spaceLastSpaceHotkey = .defaultLastSpace
 
     defaults.setHotkey(leftHotkey, forKey: DefaultsKey.left.rawValue)
     defaults.setHotkey(rightHotkey, forKey: DefaultsKey.right.rawValue)
@@ -289,6 +304,7 @@ final class HotkeyStore: ObservableObject {
     defaults.setHotkey(space8Hotkey, forKey: DefaultsKey.space8.rawValue)
     defaults.setHotkey(space9Hotkey, forKey: DefaultsKey.space9.rawValue)
     defaults.setHotkey(space10Hotkey, forKey: DefaultsKey.space10.rawValue)
+    defaults.setHotkey(spaceLastSpaceHotkey, forKey: DefaultsKey.lastSpace.rawValue)
   }
 
   func combination(for identifier: HotkeyIdentifier) -> HotkeyCombination {
@@ -305,6 +321,7 @@ final class HotkeyStore: ObservableObject {
     case .space8: return space8Hotkey
     case .space9: return space9Hotkey
     case .space10: return space10Hotkey
+    case .lastSpace: return spaceLastSpaceHotkey
     }
   }
 
@@ -331,6 +348,7 @@ final class HotkeyStore: ObservableObject {
     case space8 = "hotkey.space8"
     case space9 = "hotkey.space9"
     case space10 = "hotkey.space10"
+    case lastSpace = "hotkey.lastSpace"
   }
 }
 

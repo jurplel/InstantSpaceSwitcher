@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private let menuBarController = MenuBarController()
   private let hotkeyStore = HotkeyStore.shared
   private lazy var preferencesWindowController = PreferencesWindowController()
+  private var currentSpaceIndex: UInt32?
+  private var lastSpaceIndex: UInt32?
   private var cancellables = Set<AnyCancellable>()
   private var spaceChangeObserver: Any?
   private var appActivationObserver: Any?
@@ -163,6 +165,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     hotkeyStore.$space10Hotkey.receive(on: RunLoop.main).sink { [weak self] in
       self?.registerHotkey(for: .space10, combination: $0)
     }.store(in: &cancellables)
+    hotkeyStore.$spaceLastSpaceHotkey.receive(on: RunLoop.main).sink { [weak self] in
+      self?.registerHotkey(for: .lastSpace, combination: $0)
+    }.store(in: &cancellables)
 
     hotkeyStore.$enabledStates.receive(on: RunLoop.main).sink { [weak self] _ in
       guard let self = self else { return }
@@ -208,6 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.performSpaceSwitchToIndex(8)
       case .space10:
         self.performSpaceSwitchToIndex(9)
+      case .lastSpace:
+        self.performSpaceLastSpace()
       }
     }
   }
@@ -255,9 +262,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     OSDWindow.shared.show(message: "\(index + 1)")
   }
 
+  private func performSpaceLastSpace() {
+    guard let lastSpaceIndex, lastSpaceIndex != currentSpaceIndex else {
+      NSSound.beep()
+      return
+    }
+
+    performSpaceSwitchToIndex(lastSpaceIndex)
+  }
+
   private func refreshSpaceInfo() {
     var info = ISSSpaceInfo()
     if iss_get_menubar_space_info(&info) {
+      if currentSpaceIndex != info.currentIndex {
+        lastSpaceIndex = currentSpaceIndex
+        currentSpaceIndex = info.currentIndex
+      }
+
       menuBarController.updateWithSpaceInfo(info)
     } else {
       menuBarController.updateWithSpaceInfo(nil)
