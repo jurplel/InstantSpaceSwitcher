@@ -421,6 +421,102 @@ bool iss_switch(ISSDirection direction) {
     return iss_post_switch_gesture(direction);
 }
 
+bool iss_get_all_displays_info(ISSAllDisplaysInfo *info) {
+    if (!info) {
+        return false;
+    }
+    memset(info, 0, sizeof(*info));
+
+    if (!cgs_symbols_available()) {
+        return false;
+    }
+
+    CGSConnectionID connection = CGSMainConnectionID();
+    if (connection == 0) {
+        return false;
+    }
+
+    CGDirectDisplayID activeDisplays[ISS_MAX_DISPLAYS];
+    uint32_t activeDisplayCount = 0;
+    if (CGGetActiveDisplayList(ISS_MAX_DISPLAYS, activeDisplays, &activeDisplayCount) != kCGErrorSuccess
+        || activeDisplayCount == 0) {
+        return false;
+    }
+
+    // Get all display space data in one call
+    CFArrayRef allDisplayData = CGSCopyManagedDisplaySpaces(connection, NULL);
+    if (!allDisplayData) {
+        return false;
+    }
+
+    info->displayCount = activeDisplayCount > ISS_MAX_DISPLAYS ? ISS_MAX_DISPLAYS : activeDisplayCount;
+
+    for (uint32_t di = 0; di < info->displayCount; di++) {
+        info->displayIDs[di] = activeDisplays[di];
+
+        // Convert CGDirectDisplayID to UUID string to match against display data
+        CFUUIDRef displayUUID = CGDisplayCreateUUIDFromDisplayID(activeDisplays[di]);
+        if (!displayUUID) {
+            continue;
+        }
+        CFStringRef displayIDStr = CFUUIDCreateString(NULL, displayUUID);
+        CFRelease(displayUUID);
+        if (!displayIDStr) {
+            continue;
+        }
+
+        // Find matching display entry by "Display Identifier"
+        const CFIndex entryCount = CFArrayGetCount(allDisplayData);
+        for (CFIndex ei = 0; ei < entryCount; ei++) {
+            const void *entryValue = CFArrayGetValueAtIndex(allDisplayData, ei);
+            if (!entryValue || CFGetTypeID(entryValue) != CFDictionaryGetTypeID()) {
+                continue;
+            }
+
+            CFDictionaryRef entryDict = (CFDictionaryRef)entryValue;
+            CFStringRef identifier = (CFStringRef)CFDictionaryGetValue(entryDict, CFSTR("Display Identifier"));
+            if (!identifier || CFGetTypeID(identifier) != CFStringGetTypeID()) {
+                continue;
+            }
+
+            if (!CFEqual(identifier, displayIDStr)) {
+                continue;
+            }
+
+            // Found matching display — count its spaces
+            const void *spacesValue = CFDictionaryGetValue(entryDict, CFSTR("Spaces"));
+            if (spacesValue && CFGetTypeID(spacesValue) == CFArrayGetTypeID()) {
+                info->spaceCounts[di] = (unsigned int)CFArrayGetCount((CFArrayRef)spacesValue);
+            }
+            break;
+        }
+
+        CFRelease(displayIDStr);
+    }
+
+    CFRelease(allDisplayData);
+    return true;
+}
+
+uint32_t iss_get_cursor_display_id(void) {
+    CGEventRef tempEvent = CGEventCreate(NULL);
+    if (!tempEvent) {
+        return 0;
+    }
+    CGPoint cursorLocation = CGEventGetLocation(tempEvent);
+    CFRelease(tempEvent);
+
+    CGDirectDisplayID cursorDisplay = 0;
+    uint32_t displayCount = 0;
+
+    if (CGGetDisplaysWithPoint(cursorLocation, 1, &cursorDisplay, &displayCount) == kCGErrorSuccess
+        && displayCount > 0) {
+        return cursorDisplay;
+    }
+
+    return 0;
+}
+
 bool iss_switch_to_index(unsigned int targetIndex) {
     ISSSpaceInfo info;
     if (!iss_get_space_info(&info)) {

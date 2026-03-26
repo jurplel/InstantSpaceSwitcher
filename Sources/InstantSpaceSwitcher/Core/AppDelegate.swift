@@ -216,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Get current space info for cursor display BEFORE switch to calculate target
     var info = ISSSpaceInfo()
     let hasInfo = iss_get_space_info(&info)
+    let cursorDisplayID = iss_get_cursor_display_id()
 
     // Calculate target before attempting switch
     var targetIndex: UInt32 = 0
@@ -236,13 +237,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Update menubar space info only on successful switch
     refreshSpaceInfo()
 
-    // Show OSD with target space number only on successful switch
+    // Show OSD with target space name on successful switch
     if hasInfo {
-      OSDWindow.shared.show(message: "\(targetIndex + 1)")
+      let name = SpaceNameStore.shared.displayName(
+        forDisplayID: cursorDisplayID, spaceIndex: Int(targetIndex))
+      OSDWindow.shared.show(message: name)
     }
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
+    let cursorDisplayID = iss_get_cursor_display_id()
+
     if !iss_switch_to_index(index) {
       NSSound.beep()
       return
@@ -251,8 +256,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Update menubar space info
     refreshSpaceInfo()
 
-    // Show OSD with target space number only
-    OSDWindow.shared.show(message: "\(index + 1)")
+    // Show OSD with target space name
+    let name = SpaceNameStore.shared.displayName(
+      forDisplayID: cursorDisplayID, spaceIndex: Int(index))
+    OSDWindow.shared.show(message: name)
   }
 
   private func refreshSpaceInfo() {

@@ -2,6 +2,7 @@
 #define ISS_h
 
 #include <stdbool.h>
+#include <stdint.h>
 
 /** @brief Initialize resources
  * @return true on success, false on failure
@@ -60,5 +61,29 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction);
  * @return true if the request succeeded (already on target or switches posted)
  */
 bool iss_switch_to_index(unsigned int targetIndex);
+
+#define ISS_MAX_DISPLAYS 8
+
+/**
+ * @brief Space counts for all connected displays.
+ */
+typedef struct {
+    unsigned int displayCount;
+    unsigned int spaceCounts[ISS_MAX_DISPLAYS];
+    uint32_t displayIDs[ISS_MAX_DISPLAYS];
+} ISSAllDisplaysInfo;
+
+/**
+ * @brief Retrieves space counts for every active display.
+ * @param info Output pointer that receives the info struct.
+ * @return true on success, false on failure.
+ */
+bool iss_get_all_displays_info(ISSAllDisplaysInfo *info);
+
+/**
+ * @brief Returns the CGDirectDisplayID for the display under the cursor.
+ * @return The display ID, or 0 on failure.
+ */
+uint32_t iss_get_cursor_display_id(void);
 
 #endif /* ISS_h */
