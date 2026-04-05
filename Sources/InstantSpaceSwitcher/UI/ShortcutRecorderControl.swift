@@ -21,6 +21,10 @@ final class ShortcutRecorderControl: NSView {
         if Self.activeRecorder === self {
           Self.activeRecorder = nil
         }
+        // Re-register all hotkeys after recording ends
+        if let appDelegate = NSApp.delegate as? AppDelegate {
+          appDelegate.reregisterAllHotkeys()
+        }
       }
     }
   }

@@ -178,6 +178,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }.store(in: &cancellables)
   }
 
+  func reregisterAllHotkeys() {
+    for identifier in HotkeyIdentifier.allCases {
+      registerHotkey(for: identifier, combination: hotkeyStore.combination(for: identifier))
+    }
+  }
+
   private func registerHotkey(for identifier: HotkeyIdentifier, combination: HotkeyCombination) {
     menuBarController.applyHotkey(combination, to: identifier)
 
