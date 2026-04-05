@@ -9,7 +9,7 @@ https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 - Uses native macOS spaces
 - Free
 
-### Installation
+## Installation
 
 #### Downloads
 
