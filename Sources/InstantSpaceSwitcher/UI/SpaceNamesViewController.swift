@@ -9,8 +9,8 @@ final class SpaceNamesViewController: NSViewController {
 
   /// Each entry is either a display header or a space row.
   private enum Row {
-    case displayHeader(displayIndex: Int, displayID: UInt32)
-    case space(displayID: UInt32, spaceIndex: Int)
+    case displayHeader(displayIndex: Int)
+    case space(spaceID: UInt64, spaceIndex: Int)
   }
 
   private var rows: [Row] = []
@@ -47,20 +47,18 @@ final class SpaceNamesViewController: NSViewController {
     let displayCount = Int(info.displayCount)
 
     for di in 0..<displayCount {
-      let displayID = withUnsafePointer(to: &info.displayIDs) {
-        $0.withMemoryRebound(to: UInt32.self, capacity: Int(ISS_MAX_DISPLAYS)) { $0[di] }
-      }
       let spaceCount = withUnsafePointer(to: &info.spaceCounts) {
         Int($0.withMemoryRebound(to: UInt32.self, capacity: Int(ISS_MAX_DISPLAYS)) { $0[di] })
       }
 
-      newRows.append(.displayHeader(displayIndex: di, displayID: displayID))
+      newRows.append(.displayHeader(displayIndex: di))
       for si in 0..<spaceCount {
-        newRows.append(.space(displayID: displayID, spaceIndex: si))
+        let spaceID = withUnsafeBytes(of: &info.spaceIDs) { rawBuf in
+          let base = rawBuf.baseAddress!.assumingMemoryBound(to: UInt64.self)
+          return base[di * Int(ISS_MAX_SPACES_PER_DISPLAY) + si]
+        }
+        newRows.append(.space(spaceID: spaceID, spaceIndex: si))
       }
-
-      // Clear stale names beyond current space count
-      store.clearNames(forDisplayID: displayID, beyondCount: spaceCount)
     }
 
     // Only reload if structure changed
@@ -138,8 +136,7 @@ extension SpaceNamesViewController: NSTableViewDelegate {
     let entry = rows[row]
 
     switch entry {
-    case .displayHeader(let displayIndex, _):
-      // Group rows span all columns — only called once with tableColumn == nil or first column
+    case .displayHeader(let displayIndex):
       guard tableColumn == nil || tableColumn?.identifier.rawValue == "name" else { return nil }
       let cellView = NSTableCellView()
       let label = NSTextField(labelWithString: "Display \(displayIndex + 1)")
@@ -170,10 +167,10 @@ extension SpaceNamesViewController: NSTableViewDelegate {
 
         return cellView
       } else if tableColumn?.identifier.rawValue == "customName" {
-        guard case .space(let displayID, let spaceIndex) = entry else { return nil }
+        guard case .space(let spaceID, _) = entry else { return nil }
         let cellView = NSTableCellView()
         let textField = NSTextField()
-        textField.stringValue = store.name(forDisplayID: displayID, spaceIndex: spaceIndex) ?? ""
+        textField.stringValue = store.name(forSpaceID: spaceID) ?? ""
         textField.placeholderString = "Enter name\u{2026}"
         textField.isBordered = false
         textField.drawsBackground = false
@@ -206,8 +203,8 @@ extension SpaceNamesViewController: NSTextFieldDelegate {
     guard let textField = notification.object as? NSTextField else { return }
     let rowIndex = textField.tag
     guard rowIndex >= 0 && rowIndex < rows.count else { return }
-    guard case .space(let displayID, let spaceIndex) = rows[rowIndex] else { return }
+    guard case .space(let spaceID, _) = rows[rowIndex] else { return }
     let value = textField.stringValue.trimmingCharacters(in: .whitespaces)
-    store.setName(value.isEmpty ? nil : value, forDisplayID: displayID, spaceIndex: spaceIndex)
+    store.setName(value.isEmpty ? nil : value, forSpaceID: spaceID)
   }
 }

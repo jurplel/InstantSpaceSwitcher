@@ -144,10 +144,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     // Menu bar shows spaces for the cursor's current display
-    let displayID = iss_get_cursor_display_id()
+    let spaceIDs = AppDelegate.cursorDisplaySpaceIDs()
     let count = Int(info.spaceCount)
     for index in 0..<count {
-      let customName = SpaceNameStore.shared.name(forDisplayID: displayID, spaceIndex: index)
+      let spaceID = index < spaceIDs.count ? spaceIDs[index] : 0
+      let customName = SpaceNameStore.shared.name(forSpaceID: spaceID)
       let title = customName ?? "Space \(index + 1)"
       let item = NSMenuItem(title: title, action: #selector(switchToSpace(_:)), keyEquivalent: "")
       item.tag = index

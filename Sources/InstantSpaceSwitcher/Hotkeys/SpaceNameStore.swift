@@ -4,47 +4,33 @@ final class SpaceNameStore {
   static let shared = SpaceNameStore()
 
   private let defaults = UserDefaults.standard
-  private let keyPrefix = "spaceName."
-  private let maxTrackedSpacesPerDisplay = 20
+  private let keyPrefix = "spaceNameByID."
 
   private init() {}
 
-  // MARK: - Per-display naming
+  // MARK: - Per-space naming (keyed by stable macOS space ID)
 
-  func name(forDisplayID displayID: UInt32, spaceIndex index: Int) -> String? {
-    let value = defaults.string(forKey: "\(keyPrefix)\(displayID).\(index + 1)")
+  func name(forSpaceID spaceID: UInt64) -> String? {
+    guard spaceID != 0 else { return nil }
+    let value = defaults.string(forKey: "\(keyPrefix)\(spaceID)")
     guard let value, !value.isEmpty else { return nil }
     return value
   }
 
-  func setName(_ name: String?, forDisplayID displayID: UInt32, spaceIndex index: Int) {
-    defaults.set(name, forKey: "\(keyPrefix)\(displayID).\(index + 1)")
+  func setName(_ name: String?, forSpaceID spaceID: UInt64) {
+    guard spaceID != 0 else { return }
+    defaults.set(name, forKey: "\(keyPrefix)\(spaceID)")
   }
 
   /// Returns the custom name if set, otherwise the 1-based space number.
-  func displayName(forDisplayID displayID: UInt32, spaceIndex index: Int) -> String {
-    name(forDisplayID: displayID, spaceIndex: index) ?? "\(index + 1)"
-  }
-
-  /// Clears names for spaces beyond the given count on a specific display.
-  func clearNames(forDisplayID displayID: UInt32, beyondCount count: Int) {
-    for i in (count + 1)...maxTrackedSpacesPerDisplay {
-      defaults.removeObject(forKey: "\(keyPrefix)\(displayID).\(i)")
-    }
-  }
-
-  /// Clears all names for a specific display.
-  func clearNames(forDisplayID displayID: UInt32) {
-    for i in 1...maxTrackedSpacesPerDisplay {
-      defaults.removeObject(forKey: "\(keyPrefix)\(displayID).\(i)")
-    }
+  func displayName(forSpaceID spaceID: UInt64, fallbackIndex index: Int) -> String {
+    name(forSpaceID: spaceID) ?? "\(index + 1)"
   }
 
   func resetAll() {
-    // Clear all keys matching our prefix
-    for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(keyPrefix) {
+    for key in defaults.dictionaryRepresentation().keys
+    where key.hasPrefix(keyPrefix) || key.hasPrefix("spaceName.") {
       defaults.removeObject(forKey: key)
     }
   }
-
 }

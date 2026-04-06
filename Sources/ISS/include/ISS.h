@@ -63,14 +63,16 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction);
 bool iss_switch_to_index(unsigned int targetIndex);
 
 #define ISS_MAX_DISPLAYS 8
+#define ISS_MAX_SPACES_PER_DISPLAY 20
 
 /**
- * @brief Space counts for all connected displays.
+ * @brief Space counts for all connected displays, including stable space IDs.
  */
 typedef struct {
     unsigned int displayCount;
     unsigned int spaceCounts[ISS_MAX_DISPLAYS];
     uint32_t displayIDs[ISS_MAX_DISPLAYS];
+    uint64_t spaceIDs[ISS_MAX_DISPLAYS][ISS_MAX_SPACES_PER_DISPLAY];
 } ISSAllDisplaysInfo;
 
 /**
@@ -85,5 +87,14 @@ bool iss_get_all_displays_info(ISSAllDisplaysInfo *info);
  * @return The display ID, or 0 on failure.
  */
 uint32_t iss_get_cursor_display_id(void);
+
+/**
+ * @brief Retrieves the space IDs for the display under the cursor.
+ * @param spaceIDs Output array to receive space IDs.
+ * @param maxCount Maximum number of IDs to store.
+ * @param outCount Output pointer that receives the actual number of space IDs.
+ * @return true on success, false on failure.
+ */
+bool iss_get_cursor_display_space_ids(uint64_t *spaceIDs, unsigned int maxCount, unsigned int *outCount);
 
 #endif /* ISS_h */
