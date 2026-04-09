@@ -19,11 +19,21 @@ struct HotkeyCombination: Codable, Equatable {
     if modifiers & UInt32(optionKey) != 0 { flags.insert(.option) }
     if modifiers & UInt32(controlKey) != 0 { flags.insert(.control) }
     if modifiers & UInt32(shiftKey) != 0 { flags.insert(.shift) }
+    if modifiers & 0x20000 != 0 { flags.insert(.function) } // kEventKeyModifierFnMask
     return flags
   }
 
   var isValid: Bool {
-    modifiers != 0 && !displayKey.isEmpty
+    if !displayKey.isEmpty {
+      // f-keys and other special keys are valid without modifiers
+      if HotkeyCombination.isSpecialKey(keyCode: Int(keyCode)) {
+        return true
+      }
+
+      // standard keys still require at least one modifier to avoid hijacking typing
+      return (modifiers & ~0x20000) != 0
+    }
+    return false
   }
 
   static let defaultLeft = HotkeyCombination(
@@ -44,7 +54,7 @@ struct HotkeyCombination: Codable, Equatable {
     keyCode: UInt32(kVK_ANSI_KeypadPlus),
     modifiers: HotkeyCombination.defaultModifierMask,
     displayKey: "↩",
-    keyEquivalent: "-" 
+    keyEquivalent: "-"
   )
 
   static func defaultForSpace(_ number: Int) -> HotkeyCombination {
@@ -106,20 +116,8 @@ struct HotkeyCombination: Codable, Equatable {
 
   static func from(event: NSEvent) -> HotkeyCombination? {
     let modifiers = event.modifierFlags.carbonMask
-    guard modifiers != 0 else { return nil }
-
     let keyCode = UInt32(event.keyCode)
-    
-    // Handle arrow keys
-    if let special = event.specialKey, let symbol = arrowSymbol(for: special) {
-      return HotkeyCombination(
-        keyCode: keyCode,
-        modifiers: modifiers,
-        displayKey: symbol,
-        keyEquivalent: arrowKeyEquivalent(special)
-      )
-    }
-    
+
     // Handle special keys (Enter, F-keys, etc.)
     if let (displayKey, keyEquiv) = specialKeyInfo(for: Int(event.keyCode)) {
       return HotkeyCombination(
@@ -129,6 +127,19 @@ struct HotkeyCombination: Codable, Equatable {
         keyEquivalent: keyEquiv
       )
     }
+
+    // Handle arrow keys
+    if let special = event.specialKey, let symbol = arrowSymbol(for: special) {
+      return HotkeyCombination(
+        keyCode: keyCode,
+        modifiers: modifiers,
+        displayKey: symbol,
+        keyEquivalent: arrowKeyEquivalent(special)
+      )
+    }
+
+    // original guard for non-special keys, must have modifiers
+    guard modifiers != 0 else { return nil }
 
     guard let characters = event.charactersIgnoringModifiers, let first = characters.first,
           first.isLetter || first.isNumber || first.isPunctuation || first.isSymbol else {
@@ -153,25 +164,13 @@ struct HotkeyCombination: Codable, Equatable {
     default: return nil
     }
   }
-  
+
+  private static func isSpecialKey(keyCode: Int) -> Bool {
+    return specialKeyInfo(for: keyCode) != nil
+  }
+
   private static func specialKeyInfo(for keyCode: Int) -> (displayKey: String, keyEquivalent: String)? {
     switch keyCode {
-    // Enter/Return
-    case kVK_Return:
-      return ("↩", String(Character(UnicodeScalar(NSCarriageReturnCharacter)!)))
-    case kVK_ANSI_KeypadEnter:
-      return ("⌅", String(Character(UnicodeScalar(NSEnterCharacter)!)))
-    // Tab
-    case kVK_Tab:
-      return ("⇥", String(Character(UnicodeScalar(NSTabCharacter)!)))
-    // Delete/Backspace
-    case kVK_Delete:
-      return ("⌫", String(Character(UnicodeScalar(NSBackspaceCharacter)!)))
-    case kVK_ForwardDelete:
-      return ("⌦", String(Character(UnicodeScalar(NSDeleteCharacter)!)))
-    // Space
-    case kVK_Space:
-      return ("Space", " ")
     // F-keys
     case kVK_F1:
       return ("F1", String(Character(UnicodeScalar(NSF1FunctionKey)!)))
@@ -197,6 +196,22 @@ struct HotkeyCombination: Codable, Equatable {
       return ("F11", String(Character(UnicodeScalar(NSF11FunctionKey)!)))
     case kVK_F12:
       return ("F12", String(Character(UnicodeScalar(NSF12FunctionKey)!)))
+    // Enter/Return
+    case kVK_Return:
+      return ("↩", String(Character(UnicodeScalar(NSCarriageReturnCharacter)!)))
+    case kVK_ANSI_KeypadEnter:
+      return ("⌅", String(Character(UnicodeScalar(NSEnterCharacter)!)))
+    // Tab
+    case kVK_Tab:
+      return ("⇥", String(Character(UnicodeScalar(NSTabCharacter)!)))
+    // Delete/Backspace
+    case kVK_Delete:
+      return ("⌫", String(Character(UnicodeScalar(NSBackspaceCharacter)!)))
+    case kVK_ForwardDelete:
+      return ("⌦", String(Character(UnicodeScalar(NSDeleteCharacter)!)))
+    // Space
+    case kVK_Space:
+      return ("Space", " ")
     // Home/End/Page
     case kVK_Home:
       return ("↖", String(Character(UnicodeScalar(NSHomeFunctionKey)!)))
@@ -232,6 +247,7 @@ struct HotkeyCombination: Codable, Equatable {
     if modifiers & UInt32(optionKey) != 0 { result += "⌥" }
     if modifiers & UInt32(controlKey) != 0 { result += "⌃" }
     if modifiers & UInt32(shiftKey) != 0 { result += "⇧" }
+    if modifiers & 0x20000 != 0 { result += "fn" }
     return result
   }
 
@@ -442,6 +458,7 @@ extension NSEvent.ModifierFlags {
     if contains(.option) { mask |= UInt32(optionKey) }
     if contains(.control) { mask |= UInt32(controlKey) }
     if contains(.shift) { mask |= UInt32(shiftKey) }
+    if contains(.function) { mask |= 0x20000 } // kEventKeyModifierFnMask
     return mask
   }
 }
