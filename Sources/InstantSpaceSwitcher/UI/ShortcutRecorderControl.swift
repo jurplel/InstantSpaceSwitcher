@@ -8,6 +8,13 @@ final class ShortcutRecorderControl: NSView {
     activeRecorder?.isRecording = false
   }
 
+  var isEnabled = true {
+    didSet {
+      needsDisplay = true
+      alphaValue = isEnabled ? 1.0 : 0.5
+    }
+  }
+
   var isRecording = false {
     didSet {
       needsDisplay = true
@@ -123,6 +130,8 @@ final class ShortcutRecorderControl: NSView {
   }
 
   override func mouseDown(with event: NSEvent) {
+    guard isEnabled else { return }
+    
     // Check accessibility permissions before starting recording
     if !AXIsProcessTrusted() {
       showAccessibilityAlert()

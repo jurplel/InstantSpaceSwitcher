@@ -121,6 +121,8 @@ final class KeyboardShortcutsViewController: NSViewController {
       .store(in: &cancellables)
     store.$spaceLastSpaceHotkey.receive(on: RunLoop.main).sink { [weak self] _ in self?.loadShortcuts() }
       .store(in: &cancellables)
+    store.$enabledStates.receive(on: RunLoop.main).sink { [weak self] _ in self?.loadShortcuts() }
+      .store(in: &cancellables)
   }
 }
 
@@ -154,6 +156,7 @@ extension KeyboardShortcutsViewController: NSTableViewDelegate {
       let cellView = NSTableCellView()
       let textField = NSTextField(labelWithString: shortcut.name)
       textField.translatesAutoresizingMaskIntoConstraints = false
+      textField.textColor = shortcut.isEnabled ? .labelColor : .disabledControlTextColor
       cellView.addSubview(textField)
       cellView.textField = textField
 
@@ -170,6 +173,7 @@ extension KeyboardShortcutsViewController: NSTableViewDelegate {
       let recorder = ShortcutRecorderControl(frame: NSRect(x: 0, y: 0, width: 150, height: 22))
       recorder.currentShortcut = shortcut.combination
       recorder.translatesAutoresizingMaskIntoConstraints = false
+      recorder.isEnabled = shortcut.isEnabled
       recorder.onRecordingComplete = { [weak self] combination in
         self?.handleRecordingResult(combination, for: shortcut.identifier)
       }
@@ -185,6 +189,7 @@ extension KeyboardShortcutsViewController: NSTableViewDelegate {
       resetButton.bezelStyle = .rounded
       resetButton.isBordered = false
       resetButton.tag = row
+      resetButton.isEnabled = shortcut.isEnabled
       resetButton.translatesAutoresizingMaskIntoConstraints = false
       cellView.addSubview(resetButton)
 
@@ -240,6 +245,9 @@ extension KeyboardShortcutsViewController: NSTableViewDelegate {
 
     let identifier = shortcuts[row].identifier
     store.setEnabled(sender.state == .on, for: identifier)
+    
+    shortcuts[row].isEnabled = sender.state == .on
+    tableView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integersIn: 0..<tableView.numberOfColumns))
   }
 
   private func handleRecordingResult(
