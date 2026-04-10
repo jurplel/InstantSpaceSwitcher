@@ -20,5 +20,13 @@ Pre-built binaries are available through Github Releases [here](https://github.c
 ```sh
 git clone https://github.com/jurplel/InstantSpaceSwitcher
 cd InstantSpaceSwitcher
-./build.sh
+./dist/build.sh
+open ./build/InstantSpaceSwitcher.app
 ```
+
+## Background
+When I first bought a high refresh rate monitor, around ~2018, I could tell that the space switching animation was longer because it had scaled with the refresh rate. Because of this, I eventually stopped using spaces altogether, and have been looking for a solution ever since. 
+
+The workaround in this project is to create a synthetic trackpad gesture with an artificially high velocity. This effectively skips the animation.
+
+If you work at Apple, and your team owns the space switching animation, please fix this long-standing bug (and let us disable the animation natively, please).
