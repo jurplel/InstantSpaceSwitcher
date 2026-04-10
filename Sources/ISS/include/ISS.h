@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <sys/types.h>
 
 /** @brief Initialize resources
  * @return true on success, false on failure
@@ -117,4 +118,16 @@ void iss_set_overlay_detection_enabled(bool enabled);
  */
 void iss_set_gesture_speed(double speed);
 
-#endif /* _ISS_H */
+/*
+ * @brief Finds the space index (zero-based) for windows owned by the given process that are NOT
+ * on the current space. Returns false if the app already has a window on currentSpaceIndex
+ * (meaning no cross-space activation is needed) or if no windows were found.
+ * @param pid The process identifier to search for.
+ * @param currentSpaceIndex The caller's current zero-based space index.
+ * @param outIndex Pointer to receive the target zero-based space index.
+ * @return true if a cross-space window was found and outIndex was set.
+ */
+bool iss_get_space_index_for_pid(pid_t pid, unsigned int currentSpaceIndex, unsigned int *outIndex);
+
+#endif /* ISS_h */
+
