@@ -6,6 +6,8 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Show on-screen display when switching spaces", target: nil, action: nil)
   private let osdDurationPopup = NSPopUpButton()
   private let osdDurationLabel = NSTextField(labelWithString: "Duration:")
+  private let wrapAroundCheckbox = NSButton(
+    checkboxWithTitle: "Wrap around when switching past left or rightmost space", target: nil, action: nil)
   private let launchAtLoginCheckbox = NSButton(
     checkboxWithTitle: "Launch at login", target: nil, action: nil)
 
@@ -49,12 +51,16 @@ final class GeneralSettingsViewController: NSViewController {
     osdDurationContainer.addArrangedSubview(osdDurationLabel)
     osdDurationContainer.addArrangedSubview(osdDurationPopup)
 
+    wrapAroundCheckbox.target = self
+    wrapAroundCheckbox.action = #selector(wrapAroundChanged)
+
     launchAtLoginCheckbox.target = self
     launchAtLoginCheckbox.action = #selector(launchAtLoginChanged)
 
     stackView.addArrangedSubview(generalLabel)
     stackView.addArrangedSubview(showOSDCheckbox)
     stackView.addArrangedSubview(osdDurationContainer)
+    stackView.addArrangedSubview(wrapAroundCheckbox)
     stackView.addArrangedSubview(launchAtLoginCheckbox)
 
     view.addSubview(stackView)
@@ -79,6 +85,8 @@ final class GeneralSettingsViewController: NSViewController {
 
     osdDurationPopup.isEnabled = showOSD
 
+    wrapAroundCheckbox.state = defaults.bool(forKey: "wrapAroundSpaces") ? .on : .off
+
     launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
   }
 
@@ -86,6 +94,10 @@ final class GeneralSettingsViewController: NSViewController {
     let isEnabled = sender.state == .on
     defaults.set(isEnabled, forKey: "showOSD")
     osdDurationPopup.isEnabled = isEnabled
+  }
+
+  @objc private func wrapAroundChanged(_ sender: NSButton) {
+    defaults.set(sender.state == .on, forKey: "wrapAroundSpaces")
   }
 
   @objc private func osdDurationChanged(_ sender: NSPopUpButton) {
