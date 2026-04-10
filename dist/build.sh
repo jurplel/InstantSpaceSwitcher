@@ -30,6 +30,7 @@ echo "Bundling..."
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
 cp "${BUILD_PATH}/${PRODUCT_NAME}" "${APP_BUNDLE}/Contents/MacOS/"
+cp "${BUILD_PATH}/ISSCli" "${APP_BUNDLE}/Contents/MacOS/"
 cp Info.plist "${APP_BUNDLE}/Contents/"
 
 GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
