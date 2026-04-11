@@ -62,6 +62,7 @@ static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             bool hasActiveSpace,
                                             ISSSpaceInfo *outInfo);
 static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDisplay);
+static bool load_space_info_for_display_id(ISSSpaceInfo *info, uint32_t displayID);
 static bool iss_post_switch_gesture(ISSDirection direction);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
@@ -421,6 +422,72 @@ bool iss_switch(ISSDirection direction) {
     return iss_post_switch_gesture(direction);
 }
 
+static bool load_space_info_for_display_id(ISSSpaceInfo *info, uint32_t displayID) {
+    if (!cgs_symbols_available()) {
+        return false;
+    }
+
+    CGSConnectionID connection = CGSMainConnectionID();
+    if (connection == 0) {
+        return false;
+    }
+
+    CGSSpaceID activeSpace = 0;
+    bool hasActiveSpace = false;
+    if (&CGSGetActiveSpace != NULL) {
+        activeSpace = CGSGetActiveSpace(connection);
+        if (activeSpace != 0) {
+            hasActiveSpace = true;
+        }
+    }
+
+    CFUUIDRef displayUUID = CGDisplayCreateUUIDFromDisplayID(displayID);
+    if (!displayUUID) {
+        return false;
+    }
+    CFStringRef displayIdentifier = CFUUIDCreateString(NULL, displayUUID);
+    CFRelease(displayUUID);
+    if (!displayIdentifier) {
+        return false;
+    }
+
+    CFArrayRef displays = CGSCopyManagedDisplaySpaces(connection, displayIdentifier);
+    if (!displays) {
+        displays = CGSCopyManagedDisplaySpaces(connection, NULL);
+    }
+    if (!displays) {
+        CFRelease(displayIdentifier);
+        return false;
+    }
+
+    const CFIndex displayCount = CFArrayGetCount(displays);
+    CFDictionaryRef targetDisplay = NULL;
+
+    for (CFIndex i = 0; i < displayCount; i++) {
+        const void *displayValue = CFArrayGetValueAtIndex(displays, i);
+        if (!displayValue || CFGetTypeID(displayValue) != CFDictionaryGetTypeID()) {
+            continue;
+        }
+
+        CFDictionaryRef displayDict = (CFDictionaryRef)displayValue;
+        CFStringRef identifier = (CFStringRef)CFDictionaryGetValue(displayDict, CFSTR("Display Identifier"));
+        if (identifier && CFGetTypeID(identifier) == CFStringGetTypeID() && CFEqual(identifier, displayIdentifier)) {
+            targetDisplay = displayDict;
+            break;
+        }
+    }
+
+    bool success = false;
+    if (targetDisplay) {
+        success = extract_space_info_from_display(targetDisplay, activeSpace, hasActiveSpace, info);
+    }
+
+    CFRelease(displayIdentifier);
+    CFRelease(displays);
+
+    return success;
+}
+
 bool iss_switch_to_index(unsigned int targetIndex) {
     ISSSpaceInfo info;
     if (!iss_get_space_info(&info)) {
@@ -442,6 +509,65 @@ bool iss_switch_to_index(unsigned int targetIndex) {
 
     ISSDirection direction = info.currentIndex < targetIndex ? ISSDirectionRight : ISSDirectionLeft;
     unsigned int steps = direction == ISSDirectionRight ? (targetIndex - info.currentIndex) : (info.currentIndex - targetIndex);
+
+    for (unsigned int i = 0; i < steps; i++) {
+        if (!iss_post_switch_gesture(direction)) {
+            return false;
+        }
+    }
+
+    return !outOfBounds;
+}
+
+bool iss_get_space_info_for_display(ISSSpaceInfo *info, uint32_t displayID) {
+    if (!info) {
+        return false;
+    }
+
+    memset(info, 0, sizeof(*info));
+    return load_space_info_for_display_id(info, displayID);
+}
+
+bool iss_switch_to_index_on_display(unsigned int targetIndex, uint32_t displayID) {
+    ISSSpaceInfo info;
+    memset(&info, 0, sizeof(info));
+
+    if (!load_space_info_for_display_id(&info, displayID)) {
+        return false;
+    }
+
+    if (info.spaceCount == 0) {
+        return false;
+    }
+
+    bool outOfBounds = targetIndex >= info.spaceCount;
+    if (outOfBounds) {
+        targetIndex = info.spaceCount - 1;
+    }
+
+    // Move cursor to target display if it's not already there
+    CGEventRef tempEvent = CGEventCreate(NULL);
+    CGPoint cursorLocation = CGEventGetLocation(tempEvent);
+    CFRelease(tempEvent);
+
+    CGDirectDisplayID cursorDisplay = 0;
+    uint32_t cursorDisplayCount = 0;
+    if (CGGetDisplaysWithPoint(cursorLocation, 1, &cursorDisplay, &cursorDisplayCount) != kCGErrorSuccess
+        || cursorDisplayCount == 0 || cursorDisplay != displayID) {
+        CGRect bounds = CGDisplayBounds(displayID);
+        CGPoint center = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
+        CGWarpMouseCursorPosition(center);
+        CGAssociateMouseAndMouseCursorPosition(true);
+    }
+
+    if (info.currentIndex == targetIndex) {
+        return !outOfBounds;
+    }
+
+    ISSDirection direction = info.currentIndex < targetIndex ? ISSDirectionRight : ISSDirectionLeft;
+    unsigned int steps = direction == ISSDirectionRight
+        ? (targetIndex - info.currentIndex)
+        : (info.currentIndex - targetIndex);
 
     for (unsigned int i = 0; i < steps; i++) {
         if (!iss_post_switch_gesture(direction)) {
