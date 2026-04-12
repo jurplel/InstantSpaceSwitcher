@@ -383,14 +383,13 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
 static bool iss_post_switch_gesture(ISSDirection direction) {
     const bool isRight = (direction == ISSDirectionRight);
 
-    // ScrollGestureFlagBits seem to mark direction (anything non-zero)
-    int32_t scrollGestureFlagDirection = isRight ? 1 : 0;
-
-    // Corresponds to distance, or something along those lines
-    const double swipeProgress = isRight ? 2.0 : -2.0;
-
     // self-explanatory
     const double swipeVelocity = isRight ? 400.0 : -400.0;
+
+    // Empirically, ±FLT_TRUE_MIN here makes switching instant.
+    const float flagsProgress = isRight ? FLT_TRUE_MIN : -FLT_TRUE_MIN;
+    int32_t scrollGestureFlagDirection;
+    memcpy(&scrollGestureFlagDirection, &flagsProgress, sizeof(scrollGestureFlagDirection));
 
     //
     // -- Begin gesture --
@@ -420,6 +419,34 @@ static bool iss_post_switch_gesture(ISSDirection direction) {
     CFRelease(evB);
 
     //
+    // -- Changed gesture --
+    //
+    evA = CGEventCreate(NULL);
+    if (!evA) {
+        return false;
+    }
+    CGEventSetIntegerValueField(evA, kCGSEventTypeField, kCGSEventGesture);
+
+    evB = CGEventCreate(NULL);
+    if (!evB) {
+        CFRelease(evA);
+        return false;
+    }
+    CGEventSetIntegerValueField(evB, kCGSEventTypeField, kCGSEventDockControl);
+    CGEventSetIntegerValueField(evB, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+    CGEventSetIntegerValueField(evB, kCGEventGesturePhase, kCGSGesturePhaseChanged);
+    CGEventSetIntegerValueField(evB, kCGEventScrollGestureFlagBits, scrollGestureFlagDirection);
+    CGEventSetIntegerValueField(evB, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
+    CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
+    // Cannot explain this
+    CGEventSetDoubleValueField(evB, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
+
+    CGEventPost(kCGSessionEventTap, evB);
+    CGEventPost(kCGSessionEventTap, evA);
+    CFRelease(evA);
+    CFRelease(evB);
+
+    //
     // -- End gesture --
     //
     evA = CGEventCreate(NULL);
@@ -436,7 +463,6 @@ static bool iss_post_switch_gesture(ISSDirection direction) {
     CGEventSetIntegerValueField(evB, kCGSEventTypeField, kCGSEventDockControl);
     CGEventSetIntegerValueField(evB, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
     CGEventSetIntegerValueField(evB, kCGEventGesturePhase, kCGSGesturePhaseEnded);
-    CGEventSetDoubleValueField(evB, kCGEventGestureSwipeProgress, swipeProgress);
     CGEventSetIntegerValueField(evB, kCGEventScrollGestureFlagBits, scrollGestureFlagDirection);
     CGEventSetIntegerValueField(evB, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
     CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
