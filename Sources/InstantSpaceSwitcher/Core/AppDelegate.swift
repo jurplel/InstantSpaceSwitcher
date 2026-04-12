@@ -256,15 +256,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
-    if !iss_switch_to_index(index) {
-      NSSound.beep()
-      return
+    let spaceSlot = Int(index) + 1
+    let mapping = SpaceDisplayMapping.shared
+    let targetDisplayID = mapping.displayID(forSpaceSlot: spaceSlot)
+
+    if targetDisplayID != 0 {
+      let localIndex = mapping.localSpaceIndex(forSpaceSlot: spaceSlot)
+      if !iss_switch_to_index_on_display(localIndex, targetDisplayID) {
+        NSSound.beep()
+        return
+      }
+    } else {
+      if !iss_switch_to_index(index) {
+        NSSound.beep()
+        return
+      }
     }
 
-    // Update menubar space info
     refreshSpaceInfo()
-
-    // Show OSD with target space number only
     OSDWindow.shared.show(message: "\(index + 1)")
   }
 
