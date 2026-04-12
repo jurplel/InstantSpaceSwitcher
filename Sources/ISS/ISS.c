@@ -62,10 +62,6 @@ static bool swipeOverrideEnabled = false;
 static bool swipeTracking = false;
 static bool swipeFired = false;
 
-// Number of our own synthetic events to pass through the tap without re-intercepting.
-// Incremented by iss_post_switch_gesture, decremented by the callback.
-static int passthrough_count = 0;
-
 static ISSSwipeHandler swipeHandler = NULL;
 
 static bool extract_space_info_from_display(CFDictionaryRef displayDict,
@@ -115,12 +111,11 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
     CGSEventType eventType =
         (CGSEventType)CGEventGetIntegerValueField(event, kCGSEventTypeField);
 
-    // Pass through our own synthetic events (counted, not tagged — tags don't
-    // survive CGEventPost).
-    if (passthrough_count > 0
-        && (eventType == kCGSEventDockControl || eventType == kCGSEventGesture)) {
-        passthrough_count--;
-        return event;
+    // Pass through synthetic events (non-HID source). Real gesture events
+    // from the trackpad have sourcePid == 0 (HID kernel).
+    if (eventType == kCGSEventDockControl || eventType == kCGSEventGesture) {
+        pid_t sourcePid = (pid_t)CGEventGetIntegerValueField(event, kCGEventSourceUnixProcessID);
+        if (sourcePid != 0) return event;
     }
 
     if (eventType == kCGSEventDockControl) {
@@ -419,8 +414,6 @@ static bool iss_post_switch_gesture(ISSDirection direction) {
     CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
     // Cannot explain this
     CGEventSetDoubleValueField(evB, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
-
-    passthrough_count += 4; // 2 pairs × (evA + evB)
     CGEventPost(kCGSessionEventTap, evB);
     CGEventPost(kCGSessionEventTap, evA);
     CFRelease(evA);
