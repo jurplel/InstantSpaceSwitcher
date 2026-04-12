@@ -231,17 +231,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let hasInfo = iss_get_space_info(&info)
 
     // Calculate target before attempting switch
+    let wrapAround = UserDefaults.standard.bool(forKey: "wrapAroundSpaces")
     var targetIndex: UInt32 = 0
+    var shouldWrap = false
     if hasInfo {
       if direction == ISSDirectionLeft {
-        targetIndex = info.currentIndex > 0 ? info.currentIndex - 1 : info.currentIndex
+        if info.currentIndex == 0 && wrapAround {
+          targetIndex = info.spaceCount - 1
+          shouldWrap = true
+        } else {
+          targetIndex = info.currentIndex > 0 ? info.currentIndex - 1 : info.currentIndex
+        }
       } else {
-        targetIndex =
-          info.currentIndex + 1 < info.spaceCount ? info.currentIndex + 1 : info.currentIndex
+        if info.currentIndex + 1 >= info.spaceCount && wrapAround {
+          targetIndex = 0
+          shouldWrap = true
+        } else {
+          targetIndex =
+            info.currentIndex + 1 < info.spaceCount ? info.currentIndex + 1 : info.currentIndex
+        }
       }
     }
 
-    if !iss_switch(direction) {
+    let success: Bool
+    if shouldWrap {
+      success = iss_switch_to_index(targetIndex)
+    } else {
+      success = iss_switch(direction)
+    }
+
+    if !success {
       NSSound.beep()
       return
     }
