@@ -21,17 +21,43 @@ final class OSDWindow {
 
     guard let window = window, let label = label else { return }
 
+    // Adjust font size based on message length
+    let fontSize: CGFloat
+    switch message.count {
+    case 0...2: fontSize = 48
+    case 3...6: fontSize = 32
+    default: fontSize = 24
+    }
+    label.font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
     label.stringValue = message
 
-    // Position on cursor's screen
-    let windowSize: CGFloat = 140
+    // Calculate window size based on text content
+    let padding: CGFloat = 24
+    let minSize: CGFloat = 140
+    let maxWidth: CGFloat = 300
+    let minHeight: CGFloat = 140
+
+    // Measure single-line width first (extra 8pt buffer for text field internal margins)
+    let singleLineSize = label.attributedStringValue.size()
+    let windowWidth = min(max(ceil(singleLineSize.width) + padding * 2 + 8, minSize), maxWidth)
+
+    // Measure wrapped height within the chosen width
+    let labelWidth = windowWidth - padding * 2
+    let boundingRect = label.attributedStringValue.boundingRect(
+      with: NSSize(width: labelWidth, height: .greatestFiniteMagnitude),
+      options: [.usesLineFragmentOrigin, .usesFontLeading])
+    let windowHeight = max(boundingRect.height + padding * 2, minHeight)
+
+    window.setContentSize(NSSize(width: windowWidth, height: windowHeight))
+
+    // Position centered on cursor's screen
     let mouseLocation = NSEvent.mouseLocation
     let screen =
       NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
     if let screen = screen {
       let screenFrame = screen.visibleFrame
-      let x = screenFrame.midX - windowSize / 2
-      let y = screenFrame.midY - windowSize / 2
+      let x = screenFrame.midX - windowWidth / 2
+      let y = screenFrame.midY - windowHeight / 2
       window.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
@@ -64,15 +90,16 @@ final class OSDWindow {
     window.hidesOnDeactivate = false
 
     // Use vibrancy for native macOS look
-    let visualEffect = NSVisualEffectView(
-      frame: NSRect(x: 0, y: 0, width: windowSize, height: windowSize))
+    let visualEffect = NSVisualEffectView()
     visualEffect.material = .hudWindow
     visualEffect.state = .active
     visualEffect.wantsLayer = true
     visualEffect.layer?.cornerRadius = 18
     visualEffect.layer?.masksToBounds = true
+    visualEffect.autoresizingMask = [.width, .height]
+    visualEffect.frame = NSRect(x: 0, y: 0, width: windowSize, height: windowSize)
 
-    let label = NSTextField(labelWithString: "")
+    let label = NSTextField(wrappingLabelWithString: "")
     label.font = NSFont.systemFont(ofSize: 48, weight: .medium)
     label.textColor = .labelColor
     label.alignment = .center
@@ -80,6 +107,8 @@ final class OSDWindow {
     label.drawsBackground = false
     label.isBordered = false
     label.isEditable = false
+    label.maximumNumberOfLines = 0
+    label.lineBreakMode = .byWordWrapping
 
     visualEffect.addSubview(label)
     window.contentView = visualEffect
@@ -87,6 +116,8 @@ final class OSDWindow {
     NSLayoutConstraint.activate([
       label.centerXAnchor.constraint(equalTo: visualEffect.centerXAnchor),
       label.centerYAnchor.constraint(equalTo: visualEffect.centerYAnchor),
+      label.leadingAnchor.constraint(greaterThanOrEqualTo: visualEffect.leadingAnchor, constant: 24),
+      label.trailingAnchor.constraint(lessThanOrEqualTo: visualEffect.trailingAnchor, constant: -24),
     ])
 
     self.window = window

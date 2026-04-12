@@ -229,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Get current space info for cursor display BEFORE switch to calculate target
     var info = ISSSpaceInfo()
     let hasInfo = iss_get_space_info(&info)
+    let spaceIDs = Self.cursorDisplaySpaceIDs()
 
     // Calculate target before attempting switch
     var targetIndex: UInt32 = 0
@@ -249,13 +250,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Update menubar space info only on successful switch
     refreshSpaceInfo()
 
-    // Show OSD with target space number only on successful switch
+    // Show OSD with target space name on successful switch
     if hasInfo {
-      OSDWindow.shared.show(message: "\(targetIndex + 1)")
+      let targetIdx = Int(targetIndex)
+      let spaceID = targetIdx < spaceIDs.count ? spaceIDs[targetIdx] : 0
+      let name = SpaceNameStore.shared.displayName(
+        forSpaceID: spaceID, fallbackIndex: targetIdx)
+      OSDWindow.shared.show(message: name)
     }
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
+    let spaceIDs = Self.cursorDisplaySpaceIDs()
+
     if !iss_switch_to_index(index) {
       NSSound.beep()
       return
@@ -264,8 +271,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Update menubar space info
     refreshSpaceInfo()
 
-    // Show OSD with target space number only
-    OSDWindow.shared.show(message: "\(index + 1)")
+    // Show OSD with target space name
+    let idx = Int(index)
+    let spaceID = idx < spaceIDs.count ? spaceIDs[idx] : 0
+    let name = SpaceNameStore.shared.displayName(
+      forSpaceID: spaceID, fallbackIndex: idx)
+    OSDWindow.shared.show(message: name)
+  }
+
+  /// Returns the stable macOS space IDs for all spaces on the cursor's display.
+  static func cursorDisplaySpaceIDs() -> [UInt64] {
+    var ids = [UInt64](repeating: 0, count: Int(ISS_MAX_SPACES_PER_DISPLAY))
+    var count: UInt32 = 0
+    guard iss_get_cursor_display_space_ids(&ids, UInt32(ids.count), &count) else { return [] }
+    return Array(ids.prefix(Int(count)))
   }
 
   private func performSpaceLastSpace() {
