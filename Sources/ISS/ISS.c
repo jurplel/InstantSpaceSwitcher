@@ -660,8 +660,9 @@ void iss_on_space_changed(void) {
 
 void iss_set_switch_callback(ISSSwitchCallback callback) {
     switchCallback = callback;
+}
 
-    bool iss_get_space_index_for_pid(pid_t pid, unsigned int currentSpaceIndex, unsigned int *outIndex) {
+bool iss_get_space_index_for_pid(pid_t pid, unsigned int currentSpaceIndex, unsigned int *outIndex) {
     if (!outIndex || !cgs_symbols_available()) {
         return false;
     }
