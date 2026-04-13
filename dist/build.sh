@@ -50,8 +50,8 @@ while kill -0 "${PID_ARM64}" 2>/dev/null || kill -0 "${PID_X86}" 2>/dev/null; do
     sleep 0.2
 done
 
-wait "${PID_ARM64}"; ARM64_STATUS=$?
-wait "${PID_X86}";   X86_STATUS=$?
+wait "${PID_ARM64}" && ARM64_STATUS=0 || ARM64_STATUS=$?
+wait "${PID_X86}"   && X86_STATUS=0  || X86_STATUS=$?
 
 [[ ${ARM64_STATUS} -eq 0 ]] && ARM_FINAL="done" || ARM_FINAL="FAILED"
 [[ ${X86_STATUS}   -eq 0 ]] && X86_FINAL="done" || X86_FINAL="FAILED"
