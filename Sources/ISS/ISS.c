@@ -55,6 +55,7 @@ extern CFArrayRef CGSCopyManagedDisplaySpaces(CGSConnectionID connection, CFStri
 extern CFStringRef CGSCopyActiveMenuBarDisplayIdentifier(CGSConnectionID connection) __attribute__((weak_import));
 extern CGSConnectionID CGSMainConnectionID(void) __attribute__((weak_import));
 extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection) __attribute__((weak_import));
+extern CFArrayRef CGSCopySpacesForWindows(CGSConnectionID connection, int mask, CFArrayRef windowIDs) __attribute__((weak_import));
 
 static CFMachPortRef globalTap = NULL;
 static CFRunLoopSourceRef globalSource = NULL;
@@ -659,4 +660,202 @@ void iss_on_space_changed(void) {
 
 void iss_set_switch_callback(ISSSwitchCallback callback) {
     switchCallback = callback;
+}
+
+bool iss_get_space_index_for_pid(pid_t pid, unsigned int currentSpaceIndex, unsigned int *outIndex) {
+    if (!outIndex || !cgs_symbols_available()) {
+        return false;
+    }
+    if (&CGSCopySpacesForWindows == NULL) {
+        return false;
+    }
+
+    // Collect CGWindowID values for all normal (layer 0) windows owned by this PID.
+    CFArrayRef allWindowInfo = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionAll | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID
+    );
+    if (!allWindowInfo) {
+        return false;
+    }
+
+    CFMutableArrayRef windowIDs = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
+    if (!windowIDs) {
+        CFRelease(allWindowInfo);
+        return false;
+    }
+
+    const CFIndex windowCount = CFArrayGetCount(allWindowInfo);
+    for (CFIndex i = 0; i < windowCount; i++) {
+        CFDictionaryRef winInfo = (CFDictionaryRef)CFArrayGetValueAtIndex(allWindowInfo, i);
+        if (!winInfo || CFGetTypeID(winInfo) != CFDictionaryGetTypeID()) {
+            continue;
+        }
+
+        CFNumberRef ownerPIDNum = (CFNumberRef)CFDictionaryGetValue(winInfo, kCGWindowOwnerPID);
+        if (!ownerPIDNum) {
+            continue;
+        }
+        int32_t windowPID = 0;
+        CFNumberGetValue(ownerPIDNum, kCFNumberSInt32Type, &windowPID);
+        if ((pid_t)windowPID != pid) {
+            continue;
+        }
+
+        // Only consider normal (layer 0) windows to avoid menu-bar / HUD / overlay windows.
+        CFNumberRef layerNum = (CFNumberRef)CFDictionaryGetValue(winInfo, kCGWindowLayer);
+        if (layerNum) {
+            int32_t layer = 0;
+            CFNumberGetValue(layerNum, kCFNumberSInt32Type, &layer);
+            if (layer != 0) {
+                continue;
+            }
+        }
+
+        CFNumberRef windowIDNum = (CFNumberRef)CFDictionaryGetValue(winInfo, kCGWindowNumber);
+        if (windowIDNum) {
+            CFArrayAppendValue(windowIDs, windowIDNum);
+        }
+    }
+    CFRelease(allWindowInfo);
+
+    if (CFArrayGetCount(windowIDs) == 0) {
+        CFRelease(windowIDs);
+        return false;
+    }
+
+    // Build an index->spaceID table from the managed display spaces list so we
+    // can map raw CGS space IDs back to zero-based indices.
+    CGSConnectionID connection = CGSMainConnectionID();
+
+    CFStringRef displayIdentifier = NULL;
+    if (&CGSCopyActiveMenuBarDisplayIdentifier != NULL) {
+        displayIdentifier = CGSCopyActiveMenuBarDisplayIdentifier(connection);
+    }
+
+    CFArrayRef displays = CGSCopyManagedDisplaySpaces(connection, displayIdentifier);
+    if (!displays && displayIdentifier) {
+        displays = CGSCopyManagedDisplaySpaces(connection, NULL);
+    }
+    if (!displays) {
+        if (displayIdentifier) CFRelease(displayIdentifier);
+        CFRelease(windowIDs);
+        return false;
+    }
+
+    // Collect the ordered list of space IDs for the active display.
+    // We'll use this to convert a CGS space ID → zero-based index.
+    CFMutableArrayRef orderedSpaceIDs = CFArrayCreateMutable(NULL, 0, NULL);
+    if (!orderedSpaceIDs) {
+        CFRelease(displays);
+        if (displayIdentifier) CFRelease(displayIdentifier);
+        CFRelease(windowIDs);
+        return false;
+    }
+
+    const CFIndex displayCount = CFArrayGetCount(displays);
+    for (CFIndex d = 0; d < displayCount; d++) {
+        CFDictionaryRef displayDict = (CFDictionaryRef)CFArrayGetValueAtIndex(displays, d);
+        if (!displayDict || CFGetTypeID(displayDict) != CFDictionaryGetTypeID()) {
+            continue;
+        }
+
+        // Only process the display identified by displayIdentifier (first display if unset).
+        if (displayIdentifier) {
+            CFStringRef ident = (CFStringRef)CFDictionaryGetValue(displayDict, CFSTR("Display Identifier"));
+            if (!ident || !CFEqual(ident, displayIdentifier)) {
+                continue;
+            }
+        }
+
+        CFArrayRef spaces = (CFArrayRef)CFDictionaryGetValue(displayDict, CFSTR("Spaces"));
+        if (!spaces || CFGetTypeID(spaces) != CFArrayGetTypeID()) {
+            continue;
+        }
+
+        const CFIndex spaceCount = CFArrayGetCount(spaces);
+        for (CFIndex s = 0; s < spaceCount; s++) {
+            CFDictionaryRef spaceDict = (CFDictionaryRef)CFArrayGetValueAtIndex(spaces, s);
+            if (!spaceDict || CFGetTypeID(spaceDict) != CFDictionaryGetTypeID()) {
+                CFArrayAppendValue(orderedSpaceIDs, (void *)(uintptr_t)0);
+                continue;
+            }
+            CFNumberRef spaceIDNum = (CFNumberRef)CFDictionaryGetValue(spaceDict, CFSTR("id64"));
+            int64_t spaceID = 0;
+            if (spaceIDNum && CFGetTypeID(spaceIDNum) == CFNumberGetTypeID()) {
+                CFNumberGetValue(spaceIDNum, kCFNumberSInt64Type, &spaceID);
+            }
+            CFArrayAppendValue(orderedSpaceIDs, (void *)(uintptr_t)(uint64_t)spaceID);
+        }
+        break; // Only need the matching display.
+    }
+
+    CFRelease(displays);
+    if (displayIdentifier) CFRelease(displayIdentifier);
+
+    // Ask CGS which spaces contain the app's windows (mask 7 = all space types).
+    CFArrayRef spacesForWindows = CGSCopySpacesForWindows(connection, 7, windowIDs);
+    CFRelease(windowIDs);
+
+    if (!spacesForWindows || CFArrayGetCount(spacesForWindows) == 0) {
+        if (spacesForWindows) CFRelease(spacesForWindows);
+        CFRelease(orderedSpaceIDs);
+        return false;
+    }
+
+    // Map each returned space ID to an index and decide what to do:
+    //   - If ANY window is already on currentSpaceIndex → app is accessible here, no switch needed.
+    //   - Otherwise, return the first index found on another space.
+    const CFIndex orderedCount = CFArrayGetCount(orderedSpaceIDs);
+    bool foundOnCurrentSpace = false;
+    bool foundOther = false;
+    unsigned int otherIndex = 0;
+
+    const CFIndex winSpaceCount = CFArrayGetCount(spacesForWindows);
+    for (CFIndex ws = 0; ws < winSpaceCount; ws++) {
+        CFTypeRef entry = CFArrayGetValueAtIndex(spacesForWindows, ws);
+        if (!entry || CFGetTypeID(entry) != CFNumberGetTypeID()) {
+            continue;
+        }
+        int64_t winSpaceID = 0;
+        CFNumberGetValue((CFNumberRef)entry, kCFNumberSInt64Type, &winSpaceID);
+        if (winSpaceID == 0) {
+            continue;
+        }
+
+        // Find this space ID in our ordered list.
+        for (CFIndex s = 0; s < orderedCount; s++) {
+            int64_t candidate = (int64_t)(uintptr_t)CFArrayGetValueAtIndex(orderedSpaceIDs, s);
+            if (candidate == winSpaceID) {
+                if ((unsigned int)s == currentSpaceIndex) {
+                    foundOnCurrentSpace = true;
+                } else if (!foundOther) {
+                    foundOther = true;
+                    otherIndex = (unsigned int)s;
+                }
+                break;
+            }
+        }
+
+        // Early exit: once we know the app has a window on the current space we can stop.
+        if (foundOnCurrentSpace) {
+            break;
+        }
+    }
+
+    CFRelease(spacesForWindows);
+    CFRelease(orderedSpaceIDs);
+
+    // If the app has a window on the current space, macOS will focus it without
+    // a space switch — no action needed from us.
+    if (foundOnCurrentSpace) {
+        return false;
+    }
+
+    if (foundOther) {
+        *outIndex = otherIndex;
+        return true;
+    }
+
+    return false;
 }

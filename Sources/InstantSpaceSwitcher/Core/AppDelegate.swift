@@ -13,32 +13,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellables = Set<AnyCancellable>()
   private var spaceChangeObserver: Any?
   private var appActivationObserver: Any?
+  // Set to true briefly after any space change (swipe, our hotkeys). Prevents
+  // the didActivateApplicationNotification handler from incorrectly firing
+  // during non-CMD+TAB transitions.
+  private var recentSpaceChange = false
+  private var recentSpaceChangeTimer: DispatchWorkItem?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     ensureAccessibilityPermission()
 
     if !iss_init() {
       print("Failed to initialize ISS event tap")
-      retryIssInit()
-    }
-
-    if UserDefaults.standard.bool(forKey: "swipeOverride") {
-      iss_set_swipe_override(true)
-    }
-
-    let gestureSpeed = UserDefaults.standard.double(forKey: "gestureSpeed")
-    if gestureSpeed > 0 {
-      iss_set_gesture_speed(gestureSpeed)
-    }
-
-    if UserDefaults.standard.object(forKey: "overlayDetectionEnabled") as? Bool ?? true {
-      iss_set_overlay_detection_enabled(true)
-    }
-
-    iss_set_switch_callback { newSpaceIndex in
-      DispatchQueue.main.async {
-        OSDWindow.shared.show(message: "\(newSpaceIndex + 1)")
-      }
     }
 
     setupMainMenu()
@@ -56,24 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     stopObservingAppActivation()
   }
 
-  private func retryIssInit() {
-    guard !iss_init() else { return }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-      self?.retryIssInit()
-    }
-  }
-
   private func ensureAccessibilityPermission() {
-    guard !AXIsProcessTrusted() else { return }
-
-    if let bundleId = Bundle.main.bundleIdentifier {
-      let task = Process()
-      task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-      task.arguments = ["reset", "Accessibility", bundleId]
-      try? task.run()
-      task.waitUntilExit()
-    }
-
     let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
     let options = [promptKey: true] as CFDictionary
     _ = AXIsProcessTrustedWithOptions(options)
@@ -262,20 +230,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
   }
 
+  private func markRecentSpaceChange() {
+    recentSpaceChange = true
+    recentSpaceChangeTimer?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.recentSpaceChange = false }
+    recentSpaceChangeTimer = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+  }
+
   private func performSpaceSwitch(_ direction: ISSDirection) {
+    // Mark early so the activation handler doesn't fire for the resulting app switch.
+    markRecentSpaceChange()
+    // Get current space info for cursor display BEFORE switch to calculate target
+    var info = ISSSpaceInfo()
+    let hasInfo = iss_get_space_info(&info)
+
+    // Calculate target before attempting switch
+    var targetIndex: UInt32 = 0
+    if hasInfo {
+      if direction == ISSDirectionLeft {
+        targetIndex = info.currentIndex > 0 ? info.currentIndex - 1 : info.currentIndex
+      } else {
+        targetIndex =
+          info.currentIndex + 1 < info.spaceCount ? info.currentIndex + 1 : info.currentIndex
+      }
+    }
+
     if !iss_switch(direction) {
       NSSound.beep()
       return
     }
+
+    // Update menubar space info only on successful switch
     refreshSpaceInfo()
+
+    // Show OSD with target space number only on successful switch
+    if hasInfo {
+      OSDWindow.shared.show(message: "\(targetIndex + 1)")
+    }
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
+    markRecentSpaceChange()
     if !iss_switch_to_index(index) {
       NSSound.beep()
       return
     }
+
+    // Update menubar space info
     refreshSpaceInfo()
+
+    // Show OSD with target space number only
+    OSDWindow.shared.show(message: "\(index + 1)")
   }
 
   private func performSpaceLastSpace() {
@@ -310,8 +316,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) { [weak self] _ in
       Task { @MainActor [weak self] in
         guard let self else { return }
+        // A space change happened (swipe or our gesture). Suppress the activation
+        // handler so it doesn't fight the new active space.
+        self.markRecentSpaceChange()
         self.refreshSpaceInfo()
-        iss_on_space_changed()
         self.menuBarController.scheduleRefresh(after: 0.2)
       }
     }
@@ -330,10 +338,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       forName: NSWorkspace.didActivateApplicationNotification,
       object: nil,
       queue: .main
-    ) { [weak self] _ in
+    ) { [weak self] notification in
+      MainActor.assumeIsolated {
+      guard let self, !self.recentSpaceChange else {
+        // A space change is already in progress (swipe or our hotkey). The
+        // activation here is a side-effect of that transition, not CMD+TAB.
+        Task { @MainActor [weak self] in
+          self?.menuBarController.scheduleRefresh(after: 0.1)
+        }
+        return
+      }
+      // CMD+TAB scenario: the app became active before any space change fired.
+      // Read current space now (before macOS starts its animated transition).
+      var currentInfo = ISSSpaceInfo()
+      guard iss_get_menubar_space_info(&currentInfo) else {
+        Task { @MainActor [weak self] in
+          self?.menuBarController.scheduleRefresh(after: 0.1)
+        }
+        return
+      }
+      if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+        as? NSRunningApplication
+      {
+        var targetIndex: UInt32 = 0
+        if iss_get_space_index_for_pid(
+          app.processIdentifier, currentInfo.currentIndex, &targetIndex)
+        {
+          // App has no window on the current space — switch to where it lives.
+          _ = iss_switch_to_index(targetIndex)
+        }
+      }
       Task { @MainActor [weak self] in
         self?.menuBarController.scheduleRefresh(after: 0.1)
       }
+      } // MainActor.assumeIsolated
     }
   }
 
@@ -343,7 +381,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       appActivationObserver = nil
     }
   }
-
 }
 
 extension AppDelegate: MenuBarControllerDelegate {
@@ -362,6 +399,7 @@ extension AppDelegate: MenuBarControllerDelegate {
   func menuBarController(
     _ controller: MenuBarController, didRequestSwitchToSpaceAtIndex index: UInt32
   ) {
+    markRecentSpaceChange()
     if !iss_switch_to_index(index) {
       NSSound.beep()
     }
