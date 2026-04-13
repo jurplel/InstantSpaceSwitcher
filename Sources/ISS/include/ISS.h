@@ -1,7 +1,8 @@
-#ifndef ISS_h
-#define ISS_h
+#ifndef _ISS_H
+#define _ISS_H
 
 #include <stdbool.h>
+#include <CoreFoundation/CoreFoundation.h>
 
 /** @brief Initialize resources
  * @return true on success, false on failure
@@ -71,15 +72,43 @@ bool iss_switch_to_index(unsigned int targetIndex);
 void iss_set_swipe_override(bool enabled);
 
 /**
- * @brief Callback invoked after a swipe-override switch succeeds.
- * @param targetIndex Zero-based index of the space that was switched to.
+ * @brief Callback invoked after any successful space switch.
+ * @param newSpaceIndex Zero-based index of the space that was switched to.
  */
-typedef void (*ISSSwipeHandler)(unsigned int targetIndex);
+typedef void (*ISSSwitchCallback)(unsigned int newSpaceIndex);
 
 /**
- * @brief Registers a handler called after each successful swipe-override switch.
- * @param handler Function pointer, or NULL to clear.
+ * @brief Registers a callback invoked after each successful space switch.
+ * @param callback Function pointer, or NULL to clear.
  */
-void iss_set_swipe_handler(ISSSwipeHandler handler);
+void iss_set_switch_callback(ISSSwitchCallback callback);
 
-#endif /* ISS_h */
+/**
+ * @brief Resets the optimistic space index so the next bounds check falls back
+ * to live CGS data. Call this whenever the active space changes externally
+ * (e.g. from activeSpaceDidChangeNotification).
+ */
+void iss_on_space_changed(void);
+
+// MARK: - Public API
+
+/**
+ * @brief Returns true when App Exposé is currently active.
+ * Detects a Dock layer-18 overlay combined with 1-2 layer-20 windows.
+ */
+bool iss_is_expose_active(void);
+
+/**
+ * @brief Returns true when Mission Control is currently active.
+ * Detects a Dock layer-18 overlay combined with 3+ layer-20 windows.
+ */
+bool iss_is_mission_control_active(void);
+
+/**
+ * @brief Enables or disables experimental overlay detection.
+ * When disabled, iss_is_expose_active() and iss_is_mission_control_active() always return false.
+ * @param enabled true to enable detection, false to disable.
+ */
+void iss_set_overlay_detection_enabled(bool enabled);
+
+#endif /* _ISS_H */

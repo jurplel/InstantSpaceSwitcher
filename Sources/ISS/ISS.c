@@ -3,6 +3,8 @@
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <CoreGraphics/CGEventTypes.h>
+#include <assert.h>
+#include <dlfcn.h>
 #include <float.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -57,19 +59,28 @@ extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection) __attribute__((w
 static CFMachPortRef globalTap = NULL;
 static CFRunLoopSourceRef globalSource = NULL;
 
+// Overlay detection state
+static bool overlayDetectionEnabled = false;
+
 // Swipe override state
 static bool swipeOverrideEnabled = false;
 static bool swipeTracking = false;
 static bool swipeFired = false;
 
-static ISSSwipeHandler swipeHandler = NULL;
+static ISSSwitchCallback switchCallback = NULL;
+
+// Optimistic space index: updated on every gesture we fire so bounds checks
+// stay correct even before CGS reflects the new space.
+// Also updated from iss_on_space_changed when the active space changes externally.
+static bool hasOptimisticIndex = false;
+static unsigned int optimisticCurrentIndex = 0;
 
 static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             CGSSpaceID activeSpace,
                                             bool hasActiveSpace,
                                             ISSSpaceInfo *outInfo);
 static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDisplay);
-static bool iss_post_switch_gesture(ISSDirection direction);
+static bool iss_perform_switch_gesture(ISSDirection direction);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
 
@@ -78,20 +89,15 @@ static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direc
 static void swipe_override_switch(ISSDirection dir) {
     ISSSpaceInfo info;
     if (!iss_get_space_info(&info)) {
-        iss_post_switch_gesture(dir);
+        iss_perform_switch_gesture(dir);
         return;
     }
 
-    unsigned int target;
-    if (dir == ISSDirectionLeft) {
-        target = info.currentIndex > 0 ? info.currentIndex - 1 : info.currentIndex;
-    } else {
-        target = info.currentIndex + 1 < info.spaceCount
-            ? info.currentIndex + 1 : info.currentIndex;
-    }
-
-    if (iss_switch_with_info(&info, dir) && swipeHandler) {
-        swipeHandler(target);
+    unsigned int target = dir == ISSDirectionLeft ? info.currentIndex - 1 : info.currentIndex + 1;
+    if (iss_switch_with_info(&info, dir)) {
+        hasOptimisticIndex = true;
+        optimisticCurrentIndex = target;
+        if (switchCallback) { switchCallback(target); }
     }
 }
 
@@ -132,6 +138,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
 
         switch (phase) {
         case kCGSGesturePhaseBegan:
+            if (iss_is_expose_active()) return event;
             swipeTracking = true;
             swipeFired = false;
             return NULL;
@@ -159,6 +166,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                 if (velocity != 0.0) {
                     ISSDirection dir =
                         velocity > 0 ? ISSDirectionRight : ISSDirectionLeft;
+                    swipeFired = true;
                     swipe_override_switch(dir);
                 }
             }
@@ -369,31 +377,31 @@ static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direc
         return true;
     }
 
+    unsigned int current = hasOptimisticIndex ? optimisticCurrentIndex : info->currentIndex;
+
     if (direction == ISSDirectionLeft) {
-        return info->currentIndex == 0;
+        return current == 0;
     }
 
-    return info->currentIndex + 1 >= info->spaceCount;
+    return current + 1 >= info->spaceCount;
 }
 
 bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
     return !iss_should_block_switch(&info, direction);
 }
 
-static bool iss_post_switch_gesture(ISSDirection direction) {
+static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction) {
     const bool isRight = (direction == ISSDirectionRight);
 
-    // self-explanatory
-    const double swipeVelocity = isRight ? 400.0 : -400.0;
-
-    // Empirically, ±FLT_TRUE_MIN here makes switching instant.
+    // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant.
+    // I'm probably missing something by calling this flagBits.
     const float flagsProgress = isRight ? FLT_TRUE_MIN : -FLT_TRUE_MIN;
-    int32_t scrollGestureFlagDirection;
-    memcpy(&scrollGestureFlagDirection, &flagsProgress, sizeof(scrollGestureFlagDirection));
+    int32_t flagBits;
+    memcpy(&flagBits, &flagsProgress, sizeof(flagBits));
 
-    //
-    // -- Begin gesture --
-    //
+    // Velocity of gesture, very high
+    const double velocityX = isRight ? 400.0 : -400.0;
+
     CGEventRef evA = CGEventCreate(NULL);
     if (!evA) {
         return false;
@@ -407,76 +415,105 @@ static bool iss_post_switch_gesture(ISSDirection direction) {
     }
     CGEventSetIntegerValueField(evB, kCGSEventTypeField, kCGSEventDockControl);
     CGEventSetIntegerValueField(evB, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
-    CGEventSetIntegerValueField(evB, kCGEventGesturePhase, kCGSGesturePhaseBegan);
-    CGEventSetIntegerValueField(evB, kCGEventScrollGestureFlagBits, scrollGestureFlagDirection);
+    CGEventSetIntegerValueField(evB, kCGEventGesturePhase, phase);
+    CGEventSetIntegerValueField(evB, kCGEventScrollGestureFlagBits, flagBits);
     CGEventSetIntegerValueField(evB, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
     CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
-    // Cannot explain this
-    CGEventSetDoubleValueField(evB, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
-    CGEventPost(kCGSessionEventTap, evB);
-    CGEventPost(kCGSessionEventTap, evA);
-    CFRelease(evA);
-    CFRelease(evB);
-
-    //
-    // -- Changed gesture --
-    //
-    evA = CGEventCreate(NULL);
-    if (!evA) {
-        return false;
-    }
-    CGEventSetIntegerValueField(evA, kCGSEventTypeField, kCGSEventGesture);
-
-    evB = CGEventCreate(NULL);
-    if (!evB) {
-        CFRelease(evA);
-        return false;
-    }
-    CGEventSetIntegerValueField(evB, kCGSEventTypeField, kCGSEventDockControl);
-    CGEventSetIntegerValueField(evB, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
-    CGEventSetIntegerValueField(evB, kCGEventGesturePhase, kCGSGesturePhaseChanged);
-    CGEventSetIntegerValueField(evB, kCGEventScrollGestureFlagBits, scrollGestureFlagDirection);
-    CGEventSetIntegerValueField(evB, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
-    CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
-    // Cannot explain this
-    CGEventSetDoubleValueField(evB, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
-
-    CGEventPost(kCGSessionEventTap, evB);
-    CGEventPost(kCGSessionEventTap, evA);
-    CFRelease(evA);
-    CFRelease(evB);
-
-    //
-    // -- End gesture --
-    //
-    evA = CGEventCreate(NULL);
-    if (!evA) {
-        return false;
-    }
-    CGEventSetIntegerValueField(evA, kCGSEventTypeField, kCGSEventGesture);
-
-    evB = CGEventCreate(NULL);
-    if (!evB) {
-        CFRelease(evA);
-        return false;
-    }
-    CGEventSetIntegerValueField(evB, kCGSEventTypeField, kCGSEventDockControl);
-    CGEventSetIntegerValueField(evB, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
-    CGEventSetIntegerValueField(evB, kCGEventGesturePhase, kCGSGesturePhaseEnded);
-    CGEventSetIntegerValueField(evB, kCGEventScrollGestureFlagBits, scrollGestureFlagDirection);
-    CGEventSetIntegerValueField(evB, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
-    CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
-    CGEventSetDoubleValueField(evB, kCGEventGestureSwipeVelocityX, swipeVelocity);
+    CGEventSetDoubleValueField(evB, kCGEventGestureSwipeVelocityX, velocityX);
     CGEventSetDoubleValueField(evB, kCGEventGestureSwipeVelocityY, 0);
     // Cannot explain this
     CGEventSetDoubleValueField(evB, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
-
     CGEventPost(kCGSessionEventTap, evB);
     CGEventPost(kCGSessionEventTap, evA);
     CFRelease(evA);
     CFRelease(evB);
-
     return true;
+}
+
+static bool iss_perform_switch_gesture(ISSDirection direction) {
+    // Send three gesture events--began, changed, and ended
+    // If we only send two then mission control doesn't work.
+    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction)
+        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction)
+        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction);
+}
+
+/** @brief Walks a CGWindowListCopyWindowInfo result
+ *
+ * Used for trying to determine if Exposé or Mission Control is active.
+ *
+ * @param windowList The window list to scan
+ * @param outHasOverlay Whether a Dock layer-18 overlay is present
+ * @param outLayer20Count The count of layer-20 windows
+ */
+static void scan_dock_window_list(CFArrayRef windowList,
+                                  bool *outHasOverlay,
+                                  int *outLayer20Count) {
+    *outHasOverlay = false;
+    *outLayer20Count = 0;
+    CFIndex count = CFArrayGetCount(windowList);
+    for (CFIndex i = 0; i < count; i++) {
+        CFDictionaryRef info = (CFDictionaryRef)CFArrayGetValueAtIndex(windowList, i);
+        CFStringRef owner = (CFStringRef)CFDictionaryGetValue(info, CFSTR("kCGWindowOwnerName"));
+        if (!owner || !CFEqual(owner, CFSTR("Dock"))) continue;
+        int layer = 0;
+        CFNumberRef layerNum = (CFNumberRef)CFDictionaryGetValue(info, CFSTR("kCGWindowLayer"));
+        if (layerNum) {
+            CFNumberGetValue(layerNum, kCFNumberIntType, &layer);
+        }
+        if (layer == 18) {
+            *outHasOverlay = true;
+            continue;
+        }
+        if (layer == 20) {
+            (*outLayer20Count)++;
+        }
+    }
+}
+
+// Testable helpers
+bool iss_is_expose_detected_in_window_list(CFArrayRef windowList) {
+    bool hasOverlay = false;
+    int layer20Count = 0;
+    scan_dock_window_list(windowList, &hasOverlay, &layer20Count);
+    // App Exposé: layer-18 overlay + 1-2 layer-20 windows
+    return hasOverlay && (layer20Count == 1 || layer20Count == 2);
+}
+
+bool iss_is_mission_control_detected_in_window_list(CFArrayRef windowList) {
+    bool hasOverlay = false;
+    int layer20Count = 0;
+    scan_dock_window_list(windowList, &hasOverlay, &layer20Count);
+    // Mission Control: layer-18 overlay + 3+ layer-20 windows
+    return hasOverlay && layer20Count >= 3;
+}
+
+/// Returns true when App Exposé is active (1-2 layer-20 windows)
+/// This heuristic is empirical and may not work in all cases.
+bool iss_is_expose_active(void) {
+    if (!overlayDetectionEnabled) return false;
+    CFArrayRef windowList = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+    if (!windowList) return false;
+    bool result = iss_is_expose_detected_in_window_list(windowList);
+    CFRelease(windowList);
+    return result;
+}
+
+/// Returns true when Mission Control is active (3+ layer-20 windows)
+/// This heuristic is empirical and may not work in all cases.
+bool iss_is_mission_control_active(void) {
+    if (!overlayDetectionEnabled) return false;
+    CFArrayRef windowList = CGWindowListCopyWindowInfo(
+        kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
+    if (!windowList) return false;
+    bool result = iss_is_mission_control_detected_in_window_list(windowList);
+    CFRelease(windowList);
+    return result;
+}
+
+void iss_set_overlay_detection_enabled(bool enabled) {
+    overlayDetectionEnabled = enabled;
 }
 
 bool iss_init(void) {
@@ -541,7 +578,7 @@ static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection directio
     if (iss_should_block_switch(info, direction)) {
         return false;
     }
-    if (!iss_post_switch_gesture(direction)) {
+    if (!iss_perform_switch_gesture(direction)) {
         return false;
     }
 
@@ -551,10 +588,17 @@ static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection directio
 bool iss_switch(ISSDirection direction) {
     ISSSpaceInfo info;
     if (iss_get_space_info(&info)) {
-        return iss_switch_with_info(&info, direction);
+        unsigned int target = direction == ISSDirectionLeft ? info.currentIndex - 1 : info.currentIndex + 1;
+        if (!iss_switch_with_info(&info, direction)) {
+            return false;
+        }
+        hasOptimisticIndex = true;
+        optimisticCurrentIndex = target;
+        if (switchCallback) { switchCallback(target); }
+        return true;
     }
 
-    return iss_post_switch_gesture(direction);
+    return iss_perform_switch_gesture(direction);
 }
 
 bool iss_switch_to_index(unsigned int targetIndex) {
@@ -563,28 +607,31 @@ bool iss_switch_to_index(unsigned int targetIndex) {
         return false;
     }
 
-    if (info.spaceCount == 0) {
-        return false;
-    }
+    assert(info.spaceCount > 0);
 
     bool outOfBounds = targetIndex >= info.spaceCount;
     if (outOfBounds) {
         targetIndex = info.spaceCount - 1;
     }
 
-    if (info.currentIndex == targetIndex) {
+    unsigned int currentIndex = hasOptimisticIndex ? optimisticCurrentIndex : info.currentIndex;
+
+    if (currentIndex == targetIndex) {
         return !outOfBounds;
     }
 
-    ISSDirection direction = info.currentIndex < targetIndex ? ISSDirectionRight : ISSDirectionLeft;
-    unsigned int steps = direction == ISSDirectionRight ? (targetIndex - info.currentIndex) : (info.currentIndex - targetIndex);
+    ISSDirection direction = currentIndex < targetIndex ? ISSDirectionRight : ISSDirectionLeft;
+    unsigned int steps = direction == ISSDirectionRight ? (targetIndex - currentIndex) : (currentIndex - targetIndex);
 
     for (unsigned int i = 0; i < steps; i++) {
-        if (!iss_post_switch_gesture(direction)) {
+        if (!iss_perform_switch_gesture(direction)) {
             return false;
         }
     }
 
+    hasOptimisticIndex = true;
+    optimisticCurrentIndex = targetIndex;
+    if (switchCallback) { switchCallback(targetIndex); }
     return !outOfBounds;
 }
 
@@ -596,6 +643,10 @@ void iss_set_swipe_override(bool enabled) {
     }
 }
 
-void iss_set_swipe_handler(ISSSwipeHandler handler) {
-    swipeHandler = handler;
+void iss_on_space_changed(void) {
+    hasOptimisticIndex = false;
+}
+
+void iss_set_switch_callback(ISSSwitchCallback callback) {
+    switchCallback = callback;
 }

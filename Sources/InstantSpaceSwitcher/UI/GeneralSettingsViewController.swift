@@ -7,6 +7,10 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Show on-screen display when switching spaces", target: nil, action: nil)
   private let osdDurationPopup = NSPopUpButton()
   private let osdDurationLabel = NSTextField(labelWithString: "Duration:")
+  private let overlayDetectionCheckbox = NSButton(
+    checkboxWithTitle: "Enable Mission Control/Exposé detection", target: nil, action: nil)
+  private let showOSDInMissionControlCheckbox = NSButton(
+    checkboxWithTitle: "Show on-screen display in Mission Control", target: nil, action: nil)
   private let swipeOverrideCheckbox = NSButton(
     checkboxWithTitle: "Override swipe gesture for instant switching", target: nil, action: nil)
   private let launchAtLoginCheckbox = NSButton(
@@ -52,6 +56,12 @@ final class GeneralSettingsViewController: NSViewController {
     osdDurationContainer.addArrangedSubview(osdDurationLabel)
     osdDurationContainer.addArrangedSubview(osdDurationPopup)
 
+    overlayDetectionCheckbox.target = self
+    overlayDetectionCheckbox.action = #selector(overlayDetectionChanged)
+
+    showOSDInMissionControlCheckbox.target = self
+    showOSDInMissionControlCheckbox.action = #selector(showOSDInMissionControlChanged)
+
     swipeOverrideCheckbox.target = self
     swipeOverrideCheckbox.action = #selector(swipeOverrideChanged)
 
@@ -61,6 +71,8 @@ final class GeneralSettingsViewController: NSViewController {
     stackView.addArrangedSubview(generalLabel)
     stackView.addArrangedSubview(showOSDCheckbox)
     stackView.addArrangedSubview(osdDurationContainer)
+    stackView.addArrangedSubview(overlayDetectionCheckbox)
+    stackView.addArrangedSubview(showOSDInMissionControlCheckbox)
     stackView.addArrangedSubview(swipeOverrideCheckbox)
     stackView.addArrangedSubview(launchAtLoginCheckbox)
 
@@ -85,6 +97,10 @@ final class GeneralSettingsViewController: NSViewController {
     }
 
     osdDurationPopup.isEnabled = showOSD
+    overlayDetectionCheckbox.state = defaults.object(forKey: "overlayDetectionEnabled") as? Bool ?? true ? .on : .off
+    let overlayDetectionEnabled = overlayDetectionCheckbox.state == .on
+    showOSDInMissionControlCheckbox.isEnabled = showOSD && overlayDetectionEnabled
+    showOSDInMissionControlCheckbox.state = defaults.bool(forKey: "showOSDInMissionControl") ? .on : .off
 
     swipeOverrideCheckbox.state = defaults.bool(forKey: "swipeOverride") ? .on : .off
 
@@ -95,6 +111,20 @@ final class GeneralSettingsViewController: NSViewController {
     let isEnabled = sender.state == .on
     defaults.set(isEnabled, forKey: "showOSD")
     osdDurationPopup.isEnabled = isEnabled
+    let overlayDetectionEnabled = overlayDetectionCheckbox.state == .on
+    showOSDInMissionControlCheckbox.isEnabled = isEnabled && overlayDetectionEnabled
+  }
+
+  @objc private func overlayDetectionChanged(_ sender: NSButton) {
+    let isEnabled = sender.state == .on
+    defaults.set(isEnabled, forKey: "overlayDetectionEnabled")
+    let showOSDEnabled = showOSDCheckbox.state == .on
+    showOSDInMissionControlCheckbox.isEnabled = showOSDEnabled && isEnabled
+    iss_set_overlay_detection_enabled(isEnabled)
+  }
+
+  @objc private func showOSDInMissionControlChanged(_ sender: NSButton) {
+    defaults.set(sender.state == .on, forKey: "showOSDInMissionControl")
   }
 
   @objc private func osdDurationChanged(_ sender: NSPopUpButton) {

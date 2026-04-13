@@ -1,8 +1,8 @@
 import AppKit
+import ISS
 
 final class OSDWindow {
   static let shared = OSDWindow()
-
   private var window: NSWindow?
   private var label: NSTextField?
   private var hideTimer: Timer?
@@ -11,6 +11,11 @@ final class OSDWindow {
 
   func show(message: String) {
     guard UserDefaults.standard.bool(forKey: "showOSD") else { return }
+    // Mission Control OSD suppression requires overlay detection enabled
+    let overlayDetectionEnabled = UserDefaults.standard.bool(forKey: "overlayDetectionEnabled")
+    if overlayDetectionEnabled && iss_is_mission_control_active() && !UserDefaults.standard.bool(forKey: "showOSDInMissionControl") {
+      return
+    }
 
     hideTimer?.invalidate()
     hideTimer = nil

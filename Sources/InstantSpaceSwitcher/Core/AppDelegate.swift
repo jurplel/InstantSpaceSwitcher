@@ -26,9 +26,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       iss_set_swipe_override(true)
     }
 
-    iss_set_swipe_handler { targetIndex in
+    if UserDefaults.standard.object(forKey: "overlayDetectionEnabled") as? Bool ?? true {
+      iss_set_overlay_detection_enabled(true)
+    }
+
+    iss_set_switch_callback { newSpaceIndex in
       DispatchQueue.main.async {
-        OSDWindow.shared.show(message: "\(targetIndex + 1)")
+        OSDWindow.shared.show(message: "\(newSpaceIndex + 1)")
       }
     }
 
@@ -254,33 +258,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func performSpaceSwitch(_ direction: ISSDirection) {
-    // Get current space info for cursor display BEFORE switch to calculate target
-    var info = ISSSpaceInfo()
-    let hasInfo = iss_get_space_info(&info)
-
-    // Calculate target before attempting switch
-    var targetIndex: UInt32 = 0
-    if hasInfo {
-      if direction == ISSDirectionLeft {
-        targetIndex = info.currentIndex > 0 ? info.currentIndex - 1 : info.currentIndex
-      } else {
-        targetIndex =
-          info.currentIndex + 1 < info.spaceCount ? info.currentIndex + 1 : info.currentIndex
-      }
-    }
-
     if !iss_switch(direction) {
       NSSound.beep()
       return
     }
-
-    // Update menubar space info only on successful switch
     refreshSpaceInfo()
-
-    // Show OSD with target space number only on successful switch
-    if hasInfo {
-      OSDWindow.shared.show(message: "\(targetIndex + 1)")
-    }
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
@@ -288,12 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       NSSound.beep()
       return
     }
-
-    // Update menubar space info
     refreshSpaceInfo()
-
-    // Show OSD with target space number only
-    OSDWindow.shared.show(message: "\(index + 1)")
   }
 
   private func performSpaceLastSpace() {
@@ -329,6 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       Task { @MainActor [weak self] in
         guard let self else { return }
         self.refreshSpaceInfo()
+        iss_on_space_changed()
         self.menuBarController.scheduleRefresh(after: 0.2)
       }
     }
@@ -360,6 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       appActivationObserver = nil
     }
   }
+
 }
 
 extension AppDelegate: MenuBarControllerDelegate {
