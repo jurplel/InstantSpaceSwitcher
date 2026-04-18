@@ -67,13 +67,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     menu.addItem(NSMenuItem.separator())
 
     let aboutItem = NSMenuItem(
-      title: "About \(Constants.appName)", action: #selector(openAbout(_:)), keyEquivalent: "")
+      title: "About", action: #selector(openAbout(_:)), keyEquivalent: "")
     aboutItem.target = self
     aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
     menu.addItem(aboutItem)
 
     let quitItem = NSMenuItem(
-      title: "Quit \(Constants.appName)", action: #selector(NSApplication.terminate(_:)),
+      title: "Quit", action: #selector(NSApplication.terminate(_:)),
       keyEquivalent: "q")
     menu.addItem(quitItem)
 

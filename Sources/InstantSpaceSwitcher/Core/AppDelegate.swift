@@ -103,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     appMenuItem.submenu = appMenu
 
     let aboutItem = NSMenuItem(
-      title: "About \(Constants.appName)", action: #selector(openAbout(_:)), keyEquivalent: "")
+      title: "About", action: #selector(openAbout(_:)), keyEquivalent: "")
     aboutItem.target = self
     aboutItem.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
     appMenu.addItem(aboutItem)
@@ -148,7 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     appMenu.addItem(NSMenuItem.separator())
 
     let quitItem = NSMenuItem(
-      title: "Quit \(Constants.appName)", action: #selector(NSApplication.terminate(_:)),
+      title: "Quit", action: #selector(NSApplication.terminate(_:)),
       keyEquivalent: "q")
     quitItem.target = NSApp
     appMenu.addItem(quitItem)
