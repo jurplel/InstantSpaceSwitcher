@@ -425,12 +425,8 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
 
 static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
     const bool isRight = (direction == ISSDirectionRight);
-
     // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant.
-    // I'm probably missing something by calling this flagBits.
-    const float flagsProgress = isRight ? FLT_TRUE_MIN : -FLT_TRUE_MIN;
-    int32_t flagBits;
-    memcpy(&flagBits, &flagsProgress, sizeof(flagBits));
+    const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
 
     // Velocity of gesture based on speed setting
     const double velocityX = isRight ? velocity : -velocity;
@@ -449,7 +445,7 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     CGEventSetIntegerValueField(evB, kCGSEventTypeField, kCGSEventDockControl);
     CGEventSetIntegerValueField(evB, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
     CGEventSetIntegerValueField(evB, kCGEventGesturePhase, phase);
-    CGEventSetIntegerValueField(evB, kCGEventScrollGestureFlagBits, flagBits);
+    CGEventSetDoubleValueField(evB, kCGEventGestureSwipeProgress, progress);
     CGEventSetIntegerValueField(evB, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
     CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
     CGEventSetDoubleValueField(evB, kCGEventGestureSwipeVelocityX, velocityX);
