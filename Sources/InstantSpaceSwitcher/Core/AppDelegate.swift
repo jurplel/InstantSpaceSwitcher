@@ -311,7 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       Task { @MainActor [weak self] in
         guard let self else { return }
         self.refreshSpaceInfo()
-        iss_on_space_changed()
+        iss_reset_predictions()
         self.menuBarController.scheduleRefresh(after: 0.2)
       }
     }

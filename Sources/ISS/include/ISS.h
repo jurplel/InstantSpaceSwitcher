@@ -24,6 +24,7 @@ typedef enum {
 typedef struct {
     unsigned int currentIndex; /**< Zero-based index of the active space */
     unsigned int spaceCount;   /**< Total number of user-visible spaces */
+    char displayID[128];       /**< UUID string of the display */
 } ISSSpaceInfo;
 
 /**
@@ -84,11 +85,11 @@ typedef void (*ISSSwitchCallback)(unsigned int newSpaceIndex);
 void iss_set_switch_callback(ISSSwitchCallback callback);
 
 /**
- * @brief Resets the optimistic space index so the next bounds check falls back
+ * @brief Resets the predicted space indices so the next bounds check falls back
  * to live CGS data. Call this whenever the active space changes externally
  * (e.g. from activeSpaceDidChangeNotification).
  */
-void iss_on_space_changed(void);
+void iss_reset_predictions(void);
 
 // MARK: - Public API
 

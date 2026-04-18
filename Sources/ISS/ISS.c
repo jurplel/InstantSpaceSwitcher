@@ -72,11 +72,32 @@ static double gestureSpeed = 999999.0;
 
 static ISSSwitchCallback switchCallback = NULL;
 
-// Optimistic space index: updated on every gesture we fire so bounds checks
-// stay correct even before CGS reflects the new space.
-// Also updated from iss_on_space_changed when the active space changes externally.
-static bool hasOptimisticIndex = false;
-static unsigned int optimisticCurrentIndex = 0;
+// Predictions dictionary: DisplayID (CFStringRef) -> Index (CFNumberRef)
+static CFMutableDictionaryRef predictionsDict = NULL;
+
+static bool get_prediction(const char *displayID, unsigned int *outIndex) {
+    if (!displayID || !predictionsDict) return false;
+    
+    CFStringRef key = CFStringCreateWithCString(NULL, displayID, kCFStringEncodingUTF8);
+    const void *value = CFDictionaryGetValue(predictionsDict, key);
+    CFRelease(key);
+
+    if (value) {
+        CFNumberGetValue((CFNumberRef)value, kCFNumberIntType, outIndex);
+        return true;
+    }
+    return false;
+}
+
+static void set_prediction(const char *displayID, unsigned int index) {
+    if (!displayID || !predictionsDict) return;
+    
+    CFStringRef key = CFStringCreateWithCString(NULL, displayID, kCFStringEncodingUTF8);
+    CFNumberRef val = CFNumberCreate(NULL, kCFNumberIntType, &index);
+    CFDictionarySetValue(predictionsDict, key, val);
+    CFRelease(key);
+    CFRelease(val);
+}
 
 static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             CGSSpaceID activeSpace,
@@ -96,10 +117,12 @@ static void swipe_override_switch(ISSDirection dir) {
         return;
     }
 
-    unsigned int target = dir == ISSDirectionLeft ? info.currentIndex - 1 : info.currentIndex + 1;
+    unsigned int predicted;
+    unsigned int current = get_prediction(info.displayID, &predicted) ? predicted : info.currentIndex;
+    unsigned int target = dir == ISSDirectionLeft ? current - 1 : current + 1;
+
     if (iss_switch_with_info(&info, dir)) {
-        hasOptimisticIndex = true;
-        optimisticCurrentIndex = target;
+        set_prediction(info.displayID, target);
         if (switchCallback) { switchCallback(target); }
     }
 }
@@ -208,6 +231,12 @@ static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             ISSSpaceInfo *outInfo) {
     if (!displayDict || !outInfo) {
         return false;
+    }
+
+    memset(outInfo->displayID, 0, sizeof(outInfo->displayID));
+    CFStringRef identifier = (CFStringRef)CFDictionaryGetValue(displayDict, CFSTR("Display Identifier"));
+    if (identifier && CFGetTypeID(identifier) == CFStringGetTypeID()) {
+        CFStringGetCString(identifier, outInfo->displayID, sizeof(outInfo->displayID), kCFStringEncodingUTF8);
     }
 
     const void *spacesValue = CFDictionaryGetValue(displayDict, CFSTR("Spaces"));
@@ -380,7 +409,8 @@ static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direc
         return true;
     }
 
-    unsigned int current = hasOptimisticIndex ? optimisticCurrentIndex : info->currentIndex;
+    unsigned int predicted;
+    unsigned int current = get_prediction(info->displayID, &predicted) ? predicted : info->currentIndex;
 
     if (direction == ISSDirectionLeft) {
         return current == 0;
@@ -524,6 +554,10 @@ bool iss_init(void) {
         return true;
     }
 
+    if (!predictionsDict) {
+        predictionsDict = CFDictionaryCreateMutable(NULL, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    }
+
     CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp)
         | (1ULL << kCGSEventGesture) | (1ULL << kCGSEventDockControl);
     globalTap = CGEventTapCreate(
@@ -547,6 +581,10 @@ bool iss_init(void) {
 }
 
 void iss_destroy(void) {
+    if (predictionsDict) {
+        CFRelease(predictionsDict);
+        predictionsDict = NULL;
+    }
     if (globalTap) {
         CGEventTapEnable(globalTap, false);
         if (globalSource) {
@@ -591,12 +629,14 @@ static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection directio
 bool iss_switch(ISSDirection direction) {
     ISSSpaceInfo info;
     if (iss_get_space_info(&info)) {
-        unsigned int target = direction == ISSDirectionLeft ? info.currentIndex - 1 : info.currentIndex + 1;
+        unsigned int predicted;
+        unsigned int current = get_prediction(info.displayID, &predicted) ? predicted : info.currentIndex;
+        unsigned int target = direction == ISSDirectionLeft ? current - 1 : current + 1;
+
         if (!iss_switch_with_info(&info, direction)) {
             return false;
         }
-        hasOptimisticIndex = true;
-        optimisticCurrentIndex = target;
+        set_prediction(info.displayID, target);
         if (switchCallback) { switchCallback(target); }
         return true;
     }
@@ -617,7 +657,8 @@ bool iss_switch_to_index(unsigned int targetIndex) {
         targetIndex = info.spaceCount - 1;
     }
 
-    unsigned int currentIndex = hasOptimisticIndex ? optimisticCurrentIndex : info.currentIndex;
+    unsigned int predicted;
+    unsigned int currentIndex = get_prediction(info.displayID, &predicted) ? predicted : info.currentIndex;
 
     if (currentIndex == targetIndex) {
         return !outOfBounds;
@@ -635,8 +676,7 @@ bool iss_switch_to_index(unsigned int targetIndex) {
         }
     }
 
-    hasOptimisticIndex = true;
-    optimisticCurrentIndex = targetIndex;
+    set_prediction(info.displayID, targetIndex);
     if (switchCallback) { switchCallback(targetIndex); }
     return !outOfBounds;
 }
@@ -653,8 +693,10 @@ void iss_set_gesture_speed(double speed) {
     gestureSpeed = speed;
 }
 
-void iss_on_space_changed(void) {
-    hasOptimisticIndex = false;
+void iss_reset_predictions(void) {
+    if (predictionsDict) {
+        CFDictionaryRemoveAllValues(predictionsDict);
+    }
 }
 
 void iss_set_switch_callback(ISSSwitchCallback callback) {
