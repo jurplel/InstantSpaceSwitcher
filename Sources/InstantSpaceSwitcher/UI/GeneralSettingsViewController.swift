@@ -25,7 +25,7 @@ final class GeneralSettingsViewController: NSViewController {
   private let defaults = UserDefaults.standard
 
   override func loadView() {
-    view = NSView(frame: NSRect(x: 0, y: 0, width: 500, height: 350))
+    self.view = FormView()
   }
 
   override func viewDidLoad() {
@@ -36,74 +36,67 @@ final class GeneralSettingsViewController: NSViewController {
   }
 
   private func setupUI() {
-    let stackView = NSStackView()
-    stackView.orientation = .vertical
-    stackView.alignment = .leading
-    stackView.spacing = 16
-    stackView.translatesAutoresizingMaskIntoConstraints = false
+    guard let formView = view as? FormView else { return }
 
-    let generalLabel = NSTextField(labelWithString: "General Settings")
-    generalLabel.font = NSFont.boldSystemFont(ofSize: 13)
+    if formView.hasRows { return }
 
+    // Targets/Actions
     showOSDCheckbox.target = self
     showOSDCheckbox.action = #selector(showOSDChanged)
-
-    for duration in durationPresets {
-      osdDurationPopup.addItem(withTitle: "\(duration)ms")
-    }
     osdDurationPopup.target = self
     osdDurationPopup.action = #selector(osdDurationChanged)
-
-    let osdDurationContainer = NSStackView()
-    osdDurationContainer.orientation = .horizontal
-    osdDurationContainer.spacing = 8
-    osdDurationContainer.addArrangedSubview(osdDurationLabel)
-    osdDurationContainer.addArrangedSubview(osdDurationPopup)
-
     overlayDetectionCheckbox.target = self
     overlayDetectionCheckbox.action = #selector(overlayDetectionChanged)
-
     showOSDInMissionControlCheckbox.target = self
     showOSDInMissionControlCheckbox.action = #selector(showOSDInMissionControlChanged)
-
     swipeOverrideCheckbox.target = self
     swipeOverrideCheckbox.action = #selector(swipeOverrideChanged)
-
-    for speed in animationSpeedOptions {
-      animationSpeedPopup.addItem(withTitle: speed)
-    }
     animationSpeedPopup.target = self
     animationSpeedPopup.action = #selector(animationSpeedChanged)
-
-    let animationSpeedContainer = NSStackView()
-    animationSpeedContainer.orientation = .horizontal
-    animationSpeedContainer.spacing = 8
-    animationSpeedContainer.addArrangedSubview(animationSpeedLabel)
-    animationSpeedContainer.addArrangedSubview(animationSpeedPopup)
-
     launchAtLoginCheckbox.target = self
     launchAtLoginCheckbox.action = #selector(launchAtLoginChanged)
 
-    stackView.addArrangedSubview(generalLabel)
-    stackView.addArrangedSubview(showOSDCheckbox)
-    stackView.addArrangedSubview(osdDurationContainer)
-    stackView.addArrangedSubview(overlayDetectionCheckbox)
-    stackView.addArrangedSubview(showOSDInMissionControlCheckbox)
-    stackView.addArrangedSubview(launchAtLoginCheckbox)
+    // Populate data
+    for duration in durationPresets { osdDurationPopup.addItem(withTitle: "\(duration)ms") }
+    for speed in animationSpeedOptions { animationSpeedPopup.addItem(withTitle: speed) }
 
-    let animationLabel = NSTextField(labelWithString: "Animation")
-    animationLabel.font = NSFont.boldSystemFont(ofSize: 13)
-    stackView.addArrangedSubview(animationLabel)
-    stackView.addArrangedSubview(swipeOverrideCheckbox)
-    stackView.addArrangedSubview(animationSpeedContainer)
+    // System
+    let systemLabel = NSTextField(labelWithString: "System:")
+    formView.addRow(label: systemLabel, control: launchAtLoginCheckbox)
+    formView.addRow(label: nil, control: swipeOverrideCheckbox)
 
-    view.addSubview(stackView)
+    let experimentalTitle = NSMutableAttributedString(string: "Enable Mission Control/Exposé detection\n")
+    let sublabel = NSAttributedString(
+      string: "Experimental—may be flaky",
+      attributes: [
+        .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
+        .foregroundColor: NSColor.secondaryLabelColor
+      ])
+    experimentalTitle.append(sublabel)
+    overlayDetectionCheckbox.attributedTitle = experimentalTitle
+    
+    formView.addRow(label: nil, control: overlayDetectionCheckbox)
+    formView.addSectionSpacing()
 
-    NSLayoutConstraint.activate([
-      stackView.topAnchor.constraint(equalTo: view.topAnchor, constant: 20),
-      stackView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-      stackView.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -20),
-    ])
+    // Animation Speed
+    let animationLabel = NSTextField(labelWithString: "Animation Speed:")
+    formView.addRow(label: animationLabel, control: animationSpeedPopup)
+    formView.addSectionSpacing()
+
+    // OSD
+    let osdLabel = NSTextField(labelWithString: "On-Screen Display:")
+    showOSDCheckbox.title = "Show for"
+    showOSDInMissionControlCheckbox.title = "Show in Mission Control"
+    
+    let osdContainer = NSStackView()
+    osdContainer.orientation = .horizontal
+    osdContainer.spacing = 8
+    osdContainer.addArrangedSubview(showOSDCheckbox)
+    osdContainer.addArrangedSubview(osdDurationPopup)
+    osdContainer.addArrangedSubview(NSTextField(labelWithString: "when switching spaces"))
+    
+    formView.addRow(label: osdLabel, control: osdContainer)
+    formView.addRow(label: nil, control: showOSDInMissionControlCheckbox)
   }
 
   private func loadSettings() {
@@ -127,14 +120,13 @@ final class GeneralSettingsViewController: NSViewController {
 
     let animationSpeedValue = defaults.double(forKey: "gestureSpeed")
     if animationSpeedValue > 0 {
-      // Check if it matches one of the preset values
       if let index = animationSpeedValues.firstIndex(where: { $0 == animationSpeedValue }) {
         animationSpeedPopup.selectItem(at: index)
       } else {
-        animationSpeedPopup.selectItem(at: 4) // Default to Instant if no match
+        animationSpeedPopup.selectItem(at: 4)
       }
     } else {
-      animationSpeedPopup.selectItem(at: 4) // Default to Instant
+      animationSpeedPopup.selectItem(at: 4)
     }
 
     launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
@@ -181,7 +173,7 @@ final class GeneralSettingsViewController: NSViewController {
     if index < animationSpeedValues.count {
       velocity = animationSpeedValues[index]
     } else {
-      velocity = 2000.0 // Default to Instant
+      velocity = 2000.0
     }
 
     defaults.set(velocity, forKey: "gestureSpeed")
