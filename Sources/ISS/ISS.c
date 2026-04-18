@@ -446,13 +446,13 @@ static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) 
  * Used for trying to determine if Exposé or Mission Control is active.
  *
  * @param windowList The window list to scan
- * @param outHasOverlay Whether a Dock layer-18 overlay is present
+ * @param outLayer18Count The count of layer-18 windows
  * @param outLayer20Count The count of layer-20 windows
  */
 static void scan_dock_window_list(CFArrayRef windowList,
-                                  bool *outHasOverlay,
+                                  int *outLayer18Count,
                                   int *outLayer20Count) {
-    *outHasOverlay = false;
+    *outLayer18Count = 0;
     *outLayer20Count = 0;
     CFIndex count = CFArrayGetCount(windowList);
     for (CFIndex i = 0; i < count; i++) {
@@ -465,7 +465,7 @@ static void scan_dock_window_list(CFArrayRef windowList,
             CFNumberGetValue(layerNum, kCFNumberIntType, &layer);
         }
         if (layer == 18) {
-            *outHasOverlay = true;
+            (*outLayer18Count)++;
             continue;
         }
         if (layer == 20) {
@@ -476,19 +476,19 @@ static void scan_dock_window_list(CFArrayRef windowList,
 
 // Testable helpers
 bool iss_is_expose_detected_in_window_list(CFArrayRef windowList) {
-    bool hasOverlay = false;
+    int layer18Count = 0;
     int layer20Count = 0;
-    scan_dock_window_list(windowList, &hasOverlay, &layer20Count);
-    // App Exposé: layer-18 overlay + 1-2 layer-20 windows
-    return hasOverlay && (layer20Count == 1 || layer20Count == 2);
+    scan_dock_window_list(windowList, &layer18Count, &layer20Count);
+    // App Exposé: layer-18 present, at least one layer-20, AND count(layer=20) <= count(layer=18)
+    return layer18Count > 0 && layer20Count > 0 && layer20Count <= layer18Count;
 }
 
 bool iss_is_mission_control_detected_in_window_list(CFArrayRef windowList) {
-    bool hasOverlay = false;
+    int layer18Count = 0;
     int layer20Count = 0;
-    scan_dock_window_list(windowList, &hasOverlay, &layer20Count);
-    // Mission Control: layer-18 overlay + 3+ layer-20 windows
-    return hasOverlay && layer20Count >= 3;
+    scan_dock_window_list(windowList, &layer18Count, &layer20Count);
+    // Mission Control: layer-18 present AND count(layer=20) > count(layer=18)
+    return layer18Count > 0 && layer20Count > layer18Count;
 }
 
 /// Returns true when App Exposé is active (1-2 layer-20 windows)

@@ -203,4 +203,36 @@ final class OverlayDetectionTests: XCTestCase {
         XCTAssertTrue(iss_is_expose_detected_in_window_list(list as CFArray), "should detect Exposé")
         XCTAssertFalse(iss_is_mission_control_detected_in_window_list(list as CFArray))
     }
+
+    func testSingleDisplayMissionControl() {
+        // Single display (1728x1117) Mission Control with 2 layer-20 windows
+        let list: NSArray = [
+            dockWindow(layer: 20,  x: 0, y: 0, width: 1728, height: 1117),
+            dockWindow(layer: 20,  x: 0, y: 0, width: 1728, height: 1117),
+            dockWindow(layer: 18,  x: 0, y: 0, width: 1728, height: 1117),
+            dockWindow(layer: -2147483624, x: 0, y: 0, width: 1728, height: 1117),
+        ]
+        XCTAssertFalse(iss_is_expose_detected_in_window_list(list as CFArray))
+        XCTAssertTrue(iss_is_mission_control_detected_in_window_list(list as CFArray), "should detect Mission Control on single display")
+    }
+
+    func testSingleDisplayNormalState() {
+        // Single display (1728x1117) normal state with only wallpaper
+        let list: NSArray = [
+            dockWindow(layer: -2147483624, x: 0, y: 0, width: 1728, height: 1117),
+        ]
+        XCTAssertFalse(iss_is_expose_detected_in_window_list(list as CFArray))
+        XCTAssertFalse(iss_is_mission_control_detected_in_window_list(list as CFArray))
+    }
+
+    func testSingleDisplayAppExpose() {
+        // Single display (1728x1117) App Exposé with 1 layer-20 window
+        let list: NSArray = [
+            dockWindow(layer: 20,  x: 0, y: 0, width: 1728, height: 1117),
+            dockWindow(layer: 18,  x: 0, y: 0, width: 1728, height: 1117),
+            dockWindow(layer: -2147483624, x: 0, y: 0, width: 1728, height: 1117),
+        ]
+        XCTAssertTrue(iss_is_expose_detected_in_window_list(list as CFArray), "should detect App Exposé on single display")
+        XCTAssertFalse(iss_is_mission_control_detected_in_window_list(list as CFArray))
+    }
 }
