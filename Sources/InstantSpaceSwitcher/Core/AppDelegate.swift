@@ -230,7 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func reregisterAllHotkeys() {
     for identifier in HotkeyIdentifier.allCases {
-      registerHotkey(for: identifier, combination: hotkeyStore.combination(for: identifier))
+      let combination = hotkeyStore.combination(for: identifier)
+      menuBarController.applyHotkey(combination, to: identifier)
+      registerHotkey(for: identifier, combination: combination)
     }
   }
 
