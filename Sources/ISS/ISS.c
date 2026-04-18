@@ -18,8 +18,6 @@ static const CGEventField kCGEventGestureSwipeProgress = (CGEventField)124;
 static const CGEventField kCGEventGestureSwipeVelocityX = (CGEventField)129;
 static const CGEventField kCGEventGestureSwipeVelocityY = (CGEventField)130;
 static const CGEventField kCGEventGesturePhase = (CGEventField)132;
-static const CGEventField kCGEventScrollGestureFlagBits = (CGEventField)135;
-static const CGEventField kCGEventGestureZoomDeltaX = (CGEventField)139;
 
 // See IOHIDEventType enum in IOHIDFamily
 static const uint32_t kIOHIDEventTypeDockSwipe = 23;
@@ -441,8 +439,6 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
-    // Cannot explain this
-    CGEventSetDoubleValueField(ev, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
     CGEventPost(kCGSessionEventTap, ev);
     CFRelease(ev);
     return true;
