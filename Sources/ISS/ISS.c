@@ -13,7 +13,6 @@
 
 static const CGEventField kCGSEventTypeField = (CGEventField)55;
 static const CGEventField kCGEventGestureHIDType = (CGEventField)110;
-static const CGEventField kCGEventGestureScrollY = (CGEventField)119;
 static const CGEventField kCGEventGestureSwipeMotion = (CGEventField)123;
 static const CGEventField kCGEventGestureSwipeProgress = (CGEventField)124;
 static const CGEventField kCGEventGestureSwipeVelocityX = (CGEventField)129;
@@ -429,7 +428,7 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
 
     // Velocity of gesture based on speed setting
-    const double velocityX = isRight ? velocity : -velocity;
+    const double vel = isRight ? velocity : -velocity;
 
     CGEventRef ev = CGEventCreate(NULL);
     if (!ev) {
@@ -440,9 +439,8 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress, progress);
     CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
-    CGEventSetDoubleValueField(ev, kCGEventGestureScrollY, 0);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, velocityX);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, 0);
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
     // Cannot explain this
     CGEventSetDoubleValueField(ev, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
     CGEventPost(kCGSessionEventTap, ev);
