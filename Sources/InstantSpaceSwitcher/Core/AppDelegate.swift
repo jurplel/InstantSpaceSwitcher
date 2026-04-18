@@ -14,6 +14,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var spaceChangeObserver: Any?
   private var appActivationObserver: Any?
 
+  func applicationWillFinishLaunching(_ notification: Notification) {
+    NSAppleEventManager.shared().setEventHandler(
+      self,
+      andSelector: #selector(handleReopen),
+      forEventClass: kCoreEventClass,
+      andEventID: kAEReopenApplication
+    )
+  }
+
+  @objc private func handleReopen(_ event: NSAppleEventDescriptor, withReplyEvent replyEvent: NSAppleEventDescriptor) {
+    preferencesWindowController.present()
+  }
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     ensureAccessibilityPermission()
 
