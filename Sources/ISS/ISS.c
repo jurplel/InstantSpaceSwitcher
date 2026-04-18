@@ -68,7 +68,7 @@ static bool swipeTracking = false;
 static bool swipeFired = false;
 
 // Gesture speed state
-static double gestureSpeed = 999999.0;
+static double gestureSpeed = 2000.0;
 
 static ISSSwitchCallback switchCallback = NULL;
 

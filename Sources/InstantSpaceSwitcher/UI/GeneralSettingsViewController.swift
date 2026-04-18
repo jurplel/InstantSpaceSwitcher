@@ -15,13 +15,12 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Override swipe gesture", target: nil, action: nil)
   private let animationSpeedPopup = NSPopUpButton()
   private let animationSpeedLabel = NSTextField(labelWithString: "Animation Speed:")
-  private let customSpeedTextField = NSTextField()
   private let launchAtLoginCheckbox = NSButton(
     checkboxWithTitle: "Launch at login", target: nil, action: nil)
 
   private let durationPresets = [100, 200, 300, 500, 750, 1000]
-  private let animationSpeedOptions = ["Normal", "Fast", "Faster", "Fastest", "Instant", "Custom"]
-  private let animationSpeedValues: [Double] = [40.0, 50.0, 60.0, 80.0, 999999.0]
+  private let animationSpeedOptions = ["Normal", "Fast", "Faster", "Fastest", "Instant"]
+  private let animationSpeedValues: [Double] = [40.0, 50.0, 60.0, 80.0, 2000.0]
 
   private let defaults = UserDefaults.standard
 
@@ -76,17 +75,11 @@ final class GeneralSettingsViewController: NSViewController {
     animationSpeedPopup.target = self
     animationSpeedPopup.action = #selector(animationSpeedChanged)
 
-    customSpeedTextField.placeholderString = "Enter velocity (e.g. 60)"
-    customSpeedTextField.target = self
-    customSpeedTextField.action = #selector(customSpeedChanged)
-    customSpeedTextField.widthAnchor.constraint(equalToConstant: 100).isActive = true
-
     let animationSpeedContainer = NSStackView()
     animationSpeedContainer.orientation = .horizontal
     animationSpeedContainer.spacing = 8
     animationSpeedContainer.addArrangedSubview(animationSpeedLabel)
     animationSpeedContainer.addArrangedSubview(animationSpeedPopup)
-    animationSpeedContainer.addArrangedSubview(customSpeedTextField)
 
     launchAtLoginCheckbox.target = self
     launchAtLoginCheckbox.action = #selector(launchAtLoginChanged)
@@ -138,14 +131,11 @@ final class GeneralSettingsViewController: NSViewController {
       if let index = animationSpeedValues.firstIndex(where: { $0 == animationSpeedValue }) {
         animationSpeedPopup.selectItem(at: index)
       } else {
-        // Custom value
-        animationSpeedPopup.selectItem(at: 5)
-        customSpeedTextField.stringValue = "\(animationSpeedValue)"
+        animationSpeedPopup.selectItem(at: 4) // Default to Instant if no match
       }
     } else {
       animationSpeedPopup.selectItem(at: 4) // Default to Instant
     }
-    updateCustomSpeedTextFieldVisibility()
 
     launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
   }
@@ -186,30 +176,16 @@ final class GeneralSettingsViewController: NSViewController {
   @objc private func animationSpeedChanged(_ sender: NSPopUpButton) {
     let index = sender.indexOfSelectedItem
     guard index >= 0 && index < animationSpeedOptions.count else { return }
-    updateCustomSpeedTextFieldVisibility()
 
     var velocity: Double
     if index < animationSpeedValues.count {
       velocity = animationSpeedValues[index]
-    } else if index == 5, let customValue = Double(customSpeedTextField.stringValue), customValue > 0 {
-      velocity = customValue
     } else {
-      velocity = 1200.0 // Default to Instant
+      velocity = 2000.0 // Default to Instant
     }
 
     defaults.set(velocity, forKey: "gestureSpeed")
     iss_set_gesture_speed(velocity)
-  }
-
-  @objc private func customSpeedChanged(_ sender: NSTextField) {
-    guard let customValue = Double(sender.stringValue), customValue > 0 else { return }
-    defaults.set(customValue, forKey: "gestureSpeed")
-    iss_set_gesture_speed(customValue)
-  }
-
-  private func updateCustomSpeedTextFieldVisibility() {
-    let isCustom = animationSpeedPopup.indexOfSelectedItem == 5
-    customSpeedTextField.isHidden = !isCustom
   }
 
   @objc private func launchAtLoginChanged(_ sender: NSButton) {
