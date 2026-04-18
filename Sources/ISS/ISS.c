@@ -431,31 +431,22 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     // Velocity of gesture based on speed setting
     const double velocityX = isRight ? velocity : -velocity;
 
-    CGEventRef evA = CGEventCreate(NULL);
-    if (!evA) {
+    CGEventRef ev = CGEventCreate(NULL);
+    if (!ev) {
         return false;
     }
-    CGEventSetIntegerValueField(evA, kCGSEventTypeField, kCGSEventGesture);
-
-    CGEventRef evB = CGEventCreate(NULL);
-    if (!evB) {
-        CFRelease(evA);
-        return false;
-    }
-    CGEventSetIntegerValueField(evB, kCGSEventTypeField, kCGSEventDockControl);
-    CGEventSetIntegerValueField(evB, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
-    CGEventSetIntegerValueField(evB, kCGEventGesturePhase, phase);
-    CGEventSetDoubleValueField(evB, kCGEventGestureSwipeProgress, progress);
-    CGEventSetIntegerValueField(evB, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
-    CGEventSetDoubleValueField(evB, kCGEventGestureScrollY, 0);
-    CGEventSetDoubleValueField(evB, kCGEventGestureSwipeVelocityX, velocityX);
-    CGEventSetDoubleValueField(evB, kCGEventGestureSwipeVelocityY, 0);
+    CGEventSetIntegerValueField(ev, kCGSEventTypeField, kCGSEventDockControl);
+    CGEventSetIntegerValueField(ev, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+    CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress, progress);
+    CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
+    CGEventSetDoubleValueField(ev, kCGEventGestureScrollY, 0);
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, velocityX);
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, 0);
     // Cannot explain this
-    CGEventSetDoubleValueField(evB, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
-    CGEventPost(kCGSessionEventTap, evB);
-    CGEventPost(kCGSessionEventTap, evA);
-    CFRelease(evA);
-    CFRelease(evB);
+    CGEventSetDoubleValueField(ev, kCGEventGestureZoomDeltaX, FLT_TRUE_MIN);
+    CGEventPost(kCGSessionEventTap, ev);
+    CFRelease(ev);
     return true;
 }
 
