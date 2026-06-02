@@ -39,7 +39,7 @@ open ./build/InstantSpaceSwitcher.app
 
 ### Troubleshooting / First time startup
 
-When opening the app the first time you are likely to run into any of the following warnings:
+1. When opening the app the first time you are likely to run into any of the following warnings:
 
 > "Apple could not verify InstantSpaceSwitcher.app is free of malware"
 
@@ -49,7 +49,9 @@ When opening the app the first time you are likely to run into any of the follow
 
 Please follow the instructions [here](https://wiki.hacks.guide/wiki/Open_unsigned_applications_on_macOS_Sequoia_and_newer) for instructions on how to allow the app to run[^1].
 
-Afterward you will get a warning that InstantSpaceSwitcher wants to use accessibility features. You have to allow this.
+2. Afterward you will get a warning that InstantSpaceSwitcher wants to use accessibility features. You have to allow this.
+
+3. Then open the app from the Applications folder and the configuration window should appear.
 
 ## Background
 When I first bought a high refresh rate monitor, around ~2018, I could tell that the space switching animation was longer because it had scaled with the refresh rate. Because of this, I eventually stopped using spaces altogether, and have been looking for a solution ever since. 
