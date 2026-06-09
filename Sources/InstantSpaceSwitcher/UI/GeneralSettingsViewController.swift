@@ -17,6 +17,8 @@ final class GeneralSettingsViewController: NSViewController {
   private let animationSpeedLabel = NSTextField(labelWithString: "Animation Speed:")
   private let launchAtLoginCheckbox = NSButton(
     checkboxWithTitle: "Launch at login", target: nil, action: nil)
+  private let hideMenuBarIconCheckbox = NSButton(
+    checkboxWithTitle: "Hide menu bar icon", target: nil, action: nil)
 
   private let durationPresets = [100, 200, 300, 500, 750, 1000]
   private let animationSpeedOptions = ["Normal", "Fast", "Faster", "Fastest", "Instant"]
@@ -55,6 +57,8 @@ final class GeneralSettingsViewController: NSViewController {
     animationSpeedPopup.action = #selector(animationSpeedChanged)
     launchAtLoginCheckbox.target = self
     launchAtLoginCheckbox.action = #selector(launchAtLoginChanged)
+    hideMenuBarIconCheckbox.target = self
+    hideMenuBarIconCheckbox.action = #selector(hideMenuBarIconChanged)
 
     // Populate data
     for duration in durationPresets { osdDurationPopup.addItem(withTitle: "\(duration)ms") }
@@ -63,6 +67,7 @@ final class GeneralSettingsViewController: NSViewController {
     // System
     let systemLabel = NSTextField(labelWithString: "System:")
     formView.addRow(label: systemLabel, control: launchAtLoginCheckbox)
+    formView.addRow(label: nil, control: hideMenuBarIconCheckbox)
     formView.addRow(label: nil, control: swipeOverrideCheckbox)
 
     let experimentalTitle = NSMutableAttributedString(string: "Enable Mission Control/Exposé detection\n")
@@ -116,6 +121,7 @@ final class GeneralSettingsViewController: NSViewController {
     showOSDInMissionControlCheckbox.isEnabled = showOSD && overlayDetectionEnabled
     showOSDInMissionControlCheckbox.state = defaults.bool(forKey: "showOSDInMissionControl") ? .on : .off
 
+    hideMenuBarIconCheckbox.state = defaults.bool(forKey: "hideMenuBarIcon") ? .on : .off
     swipeOverrideCheckbox.state = defaults.bool(forKey: "swipeOverride") ? .on : .off
 
     let animationSpeedValue = defaults.double(forKey: "gestureSpeed")
@@ -178,6 +184,12 @@ final class GeneralSettingsViewController: NSViewController {
 
     defaults.set(velocity, forKey: "gestureSpeed")
     iss_set_gesture_speed(velocity)
+  }
+
+  @objc private func hideMenuBarIconChanged(_ sender: NSButton) {
+    let hide = sender.state == .on
+    defaults.set(hide, forKey: "hideMenuBarIcon")
+    (NSApp.delegate as? AppDelegate)?.setMenuBarIconVisible(!hide)
   }
 
   @objc private func launchAtLoginChanged(_ sender: NSButton) {
