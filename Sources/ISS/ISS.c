@@ -66,6 +66,7 @@ static bool swipeFired = false;
 
 // Gesture speed state
 static double gestureSpeed = 2000.0;
+static const double gestureVelocityReferenceRefreshRateHz = 120.0;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -104,6 +105,19 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
+static bool iss_get_cursor_display(CGDirectDisplayID *outDisplay);
+static double iss_refresh_rate_for_display(CGDirectDisplayID display);
+
+double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double refreshRate) {
+    if (refreshRate <= gestureVelocityReferenceRefreshRateHz) {
+        return velocity;
+    }
+
+    // Dock's Spaces animation thresholds grow faster than linearly on very high
+    // refresh displays, so keep existing <=120 Hz behavior and compensate above it.
+    double refreshRatio = refreshRate / gestureVelocityReferenceRefreshRateHz;
+    return velocity * refreshRatio * refreshRatio;
+}
 
 // Perform a swipe-override switch: get space info, compute target, switch,
 // and notify the handler with the target index.
@@ -398,6 +412,42 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
     return success;
 }
 
+static bool iss_get_cursor_display(CGDirectDisplayID *outDisplay) {
+    if (!outDisplay) {
+        return false;
+    }
+
+    CGEventRef tempEvent = CGEventCreate(NULL);
+    if (!tempEvent) {
+        return false;
+    }
+
+    CGPoint cursorLocation = CGEventGetLocation(tempEvent);
+    CFRelease(tempEvent);
+
+    CGDirectDisplayID cursorDisplay = 0;
+    uint32_t cursorDisplayCount = 0;
+    CGError result = CGGetDisplaysWithPoint(cursorLocation, 1, &cursorDisplay, &cursorDisplayCount);
+    if (result != kCGErrorSuccess || cursorDisplayCount == 0) {
+        return false;
+    }
+
+    *outDisplay = cursorDisplay;
+    return true;
+}
+
+static double iss_refresh_rate_for_display(CGDirectDisplayID display) {
+    double refreshRate = 0.0;
+
+    CGDisplayModeRef displayMode = CGDisplayCopyDisplayMode(display);
+    if (displayMode) {
+        refreshRate = CGDisplayModeGetRefreshRate(displayMode);
+        CGDisplayModeRelease(displayMode);
+    }
+
+    return refreshRate;
+}
+
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction) {
     if (!info) {
         return false;
@@ -445,6 +495,12 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
 }
 
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
+    CGDirectDisplayID display = 0;
+    if (iss_get_cursor_display(&display)) {
+        double refreshRate = iss_refresh_rate_for_display(display);
+        velocity = iss_normalize_gesture_velocity_for_refresh_rate(velocity, refreshRate);
+    }
+
     // Send three gesture events--began, changed, and ended
     // If we only send two then mission control doesn't work.
     return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, velocity)

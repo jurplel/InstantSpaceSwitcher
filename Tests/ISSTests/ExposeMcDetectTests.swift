@@ -9,6 +9,9 @@ private func iss_is_expose_detected_in_window_list(_ windowList: CFArray) -> Boo
 
 @_silgen_name("iss_is_mission_control_detected_in_window_list")
 private func iss_is_mission_control_detected_in_window_list(_ windowList: CFArray) -> Bool
+
+@_silgen_name("iss_normalize_gesture_velocity_for_refresh_rate")
+private func iss_normalize_gesture_velocity_for_refresh_rate(_ velocity: Double, _ refreshRate: Double) -> Double
 //
 // Window structures are hardcoded from real probe output (expose_probe.c) captured
 // on macOS Sequoia with two displays (1920x1080 primary, 1728x1117 secondary).
@@ -234,5 +237,37 @@ final class OverlayDetectionTests: XCTestCase {
         ]
         XCTAssertTrue(iss_is_expose_detected_in_window_list(list as CFArray), "should detect App Exposé on single display")
         XCTAssertFalse(iss_is_mission_control_detected_in_window_list(list as CFArray))
+    }
+}
+
+final class GestureVelocityTests: XCTestCase {
+    func testVelocityIsUnchangedAtReferenceRefreshRate() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 120.0), 80.0, accuracy: 0.0001)
+    }
+
+    func testVelocityIsUnchangedBelowReferenceRefreshRate() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 60.0), 80.0, accuracy: 0.0001)
+    }
+
+    func testAllPresetVelocitiesScaleAboveReferenceRefreshRate() {
+        let presets: [(input: Double, expected: Double)] = [
+            (40.0, 160.0),
+            (50.0, 200.0),
+            (60.0, 240.0),
+            (80.0, 320.0),
+            (2000.0, 8000.0),
+        ]
+
+        for preset in presets {
+            XCTAssertEqual(
+                iss_normalize_gesture_velocity_for_refresh_rate(preset.input, 240.0),
+                preset.expected,
+                accuracy: 0.0001
+            )
+        }
+    }
+
+    func testUnknownRefreshRateLeavesVelocityUnchanged() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 0.0), 80.0, accuracy: 0.0001)
     }
 }
