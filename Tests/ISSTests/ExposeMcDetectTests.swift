@@ -241,13 +241,14 @@ final class OverlayDetectionTests: XCTestCase {
 }
 
 final class GestureVelocityTests: XCTestCase {
-    func testVelocityIsUnchangedAtReferenceRefreshRate() {
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 120.0), 80.0, accuracy: 0.0001)
+    func testVelocityScalesAtPivotRefreshRate() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 120.0), 160.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 120.0), 120.0, accuracy: 0.0001)
     }
 
-    func testVelocityScalesBelowReferenceRefreshRate() {
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 60.0), 40.0, accuracy: 0.0001)
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 90.0), 45.0, accuracy: 0.0001)
+    func testVelocityScalesBetweenLowReferenceAndPivotRefreshRates() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 60.0), 80.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 90.0), 90.0, accuracy: 0.0001)
     }
 
     func testAllPresetVelocitiesScaleAboveReferenceRefreshRate() {
