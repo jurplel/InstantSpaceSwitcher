@@ -22,6 +22,7 @@ done
 
 PRODUCT_NAME="InstantSpaceSwitcher"
 BUILD_DIR="build"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 
 if [[ "$CLEAN" == true ]]; then
   echo "Cleaning build directory..."
@@ -95,8 +96,12 @@ echo "Injecting git SHA: ${GIT_SHA}"
 /usr/libexec/PlistBuddy -c "Set :GitCommitHash ${GIT_SHA}" "${APP_BUNDLE}/Contents/Info.plist"
 
 echo ""
-echo "Signing (ad-hoc)..."
-codesign --force --deep --sign - "${APP_BUNDLE}"
+if [[ "${CODESIGN_IDENTITY}" == "-" ]]; then
+  echo "Signing (ad-hoc)..."
+else
+  echo "Signing with identity: ${CODESIGN_IDENTITY}"
+fi
+codesign --force --deep --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
 
 echo ""
 echo "App bundled at $(pwd)/${APP_BUNDLE} (${BUILD_CONFIG})"

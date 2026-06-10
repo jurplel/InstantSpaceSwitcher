@@ -28,8 +28,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    ensureAccessibilityPermission()
-
     if !iss_init() {
       print("Failed to initialize ISS event tap")
       retryIssInit()
@@ -74,22 +72,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
       self?.retryIssInit()
     }
-  }
-
-  private func ensureAccessibilityPermission() {
-    guard !AXIsProcessTrusted() else { return }
-
-    if let bundleId = Bundle.main.bundleIdentifier {
-      let task = Process()
-      task.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-      task.arguments = ["reset", "Accessibility", bundleId]
-      try? task.run()
-      task.waitUntilExit()
-    }
-
-    let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-    let options = [promptKey: true] as CFDictionary
-    _ = AXIsProcessTrustedWithOptions(options)
   }
 
   private func setupMainMenu() {

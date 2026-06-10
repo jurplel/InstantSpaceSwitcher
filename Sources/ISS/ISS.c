@@ -67,6 +67,7 @@ static bool swipeFired = false;
 // Gesture speed state
 static double gestureSpeed = 2000.0;
 static const double gestureVelocityReferenceRefreshRateHz = 120.0;
+static const double instantGestureVelocity = 2000.0;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -109,14 +110,16 @@ static bool iss_get_cursor_display(CGDirectDisplayID *outDisplay);
 static double iss_refresh_rate_for_display(CGDirectDisplayID display);
 
 double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double refreshRate) {
-    if (refreshRate <= gestureVelocityReferenceRefreshRateHz) {
+    // Instant and deliberately higher multi-space velocities need no refresh compensation.
+    if (refreshRate <= gestureVelocityReferenceRefreshRateHz || velocity >= instantGestureVelocity) {
         return velocity;
     }
 
     // Dock's Spaces animation thresholds grow faster than linearly on very high
     // refresh displays, so keep existing <=120 Hz behavior and compensate above it.
     double refreshRatio = refreshRate / gestureVelocityReferenceRefreshRateHz;
-    return velocity * refreshRatio * refreshRatio;
+    double normalizedVelocity = velocity * refreshRatio * refreshRatio;
+    return normalizedVelocity < instantGestureVelocity ? normalizedVelocity : instantGestureVelocity;
 }
 
 // Perform a swipe-override switch: get space info, compute target, switch,

@@ -255,7 +255,7 @@ final class GestureVelocityTests: XCTestCase {
             (50.0, 200.0),
             (60.0, 240.0),
             (80.0, 320.0),
-            (2000.0, 8000.0),
+            (2000.0, 2000.0),
         ]
 
         for preset in presets {
@@ -269,5 +269,27 @@ final class GestureVelocityTests: XCTestCase {
 
     func testUnknownRefreshRateLeavesVelocityUnchanged() {
         XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 0.0), 80.0, accuracy: 0.0001)
+    }
+
+    func testNonInstantVelocityDoesNotExceedInstantPreset() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 1000.0), 2000.0, accuracy: 0.0001)
+    }
+
+    func testMultiSpaceVelocityAboveInstantIsUnchanged() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(4000.0, 240.0), 4000.0, accuracy: 0.0001)
+    }
+
+    func testPresetOrderIsPreservedAcrossSupportedRefreshRates() {
+        let presets = [40.0, 50.0, 60.0, 80.0, 2000.0]
+
+        for refreshRate in [60.0, 120.0, 144.0, 165.0, 240.0, 360.0] {
+            let normalized = presets.map {
+                iss_normalize_gesture_velocity_for_refresh_rate($0, refreshRate)
+            }
+
+            for index in 1..<normalized.count {
+                XCTAssertGreaterThan(normalized[index], normalized[index - 1])
+            }
+        }
     }
 }
