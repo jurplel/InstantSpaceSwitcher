@@ -115,10 +115,12 @@ double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double r
         return velocity;
     }
 
-    // Dock's Spaces animation thresholds grow faster than linearly on very high
-    // refresh displays, so keep existing <=120 Hz behavior and compensate above it.
+    // Preserve <=120 Hz behavior, then increase compensation continuously above
+    // it. A 240 Hz display needs roughly 5x velocity for every non-instant preset
+    // to cross Dock's gesture-completion threshold while retaining preset order.
     double refreshRatio = refreshRate / gestureVelocityReferenceRefreshRateHz;
-    double normalizedVelocity = velocity * refreshRatio * refreshRatio;
+    double compensationFactor = 1.0 + 4.0 * (refreshRatio - 1.0);
+    double normalizedVelocity = velocity * compensationFactor;
     return normalizedVelocity < instantGestureVelocity ? normalizedVelocity : instantGestureVelocity;
 }
 

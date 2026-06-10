@@ -251,10 +251,10 @@ final class GestureVelocityTests: XCTestCase {
 
     func testAllPresetVelocitiesScaleAboveReferenceRefreshRate() {
         let presets: [(input: Double, expected: Double)] = [
-            (40.0, 160.0),
-            (50.0, 200.0),
-            (60.0, 240.0),
-            (80.0, 320.0),
+            (40.0, 200.0),
+            (50.0, 250.0),
+            (60.0, 300.0),
+            (80.0, 400.0),
             (2000.0, 2000.0),
         ]
 
