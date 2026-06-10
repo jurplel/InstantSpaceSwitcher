@@ -241,22 +241,22 @@ final class OverlayDetectionTests: XCTestCase {
 }
 
 final class GestureVelocityTests: XCTestCase {
-    func testVelocityScalesAtPivotRefreshRate() {
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 120.0), 160.0, accuracy: 0.0001)
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 120.0), 120.0, accuracy: 0.0001)
+    func testVelocityIsUnchangedAtReferenceRefreshRate() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 120.0), 80.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 120.0), 60.0, accuracy: 0.0001)
     }
 
-    func testVelocityScalesBetweenLowReferenceAndPivotRefreshRates() {
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 60.0), 80.0, accuracy: 0.0001)
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 90.0), 90.0, accuracy: 0.0001)
+    func testVelocityScalesBelowReferenceRefreshRate() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 60.0), 40.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 90.0), 45.0, accuracy: 0.0001)
     }
 
     func testAllPresetVelocitiesScaleAboveReferenceRefreshRate() {
         let presets: [(input: Double, expected: Double)] = [
-            (40.0, 200.0),
-            (50.0, 225.0),
-            (60.0, 250.0),
-            (80.0, 300.0),
+            (40.0, 80.0),
+            (50.0, 100.0),
+            (60.0, 120.0),
+            (80.0, 160.0),
             (2000.0, 2000.0),
         ]
 
@@ -280,12 +280,12 @@ final class GestureVelocityTests: XCTestCase {
     }
 
     func testNonInstantVelocityDoesNotExceedInstantPreset() {
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 2000.0), 2000.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 3000.0), 2000.0, accuracy: 0.0001)
     }
 
     func testFasterPresetStaysBelowPreviousFastestCompensationAt240Hz() {
         XCTAssertLessThan(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 240.0), 300.0)
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 240.0), 300.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 240.0), 160.0, accuracy: 0.0001)
     }
 
     func testMultiSpaceVelocityAboveInstantIsUnchanged() {

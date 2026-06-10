@@ -66,9 +66,7 @@ static bool swipeFired = false;
 
 // Gesture speed state
 static double gestureSpeed = 2000.0;
-static const double gestureVelocityLowRefreshReferenceHz = 60.0;
 static const double gestureVelocityReferenceRefreshRateHz = 120.0;
-static const double nonInstantGestureVelocityFloor = 40.0;
 static const double instantGestureVelocity = 2000.0;
 
 static ISSSwitchCallback switchCallback = NULL;
@@ -118,24 +116,7 @@ double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double r
     }
 
     double refreshRatio = refreshRate / gestureVelocityReferenceRefreshRateHz;
-    if (refreshRate <= gestureVelocityReferenceRefreshRateHz) {
-        return velocity * (refreshRate / gestureVelocityLowRefreshReferenceHz);
-    }
-
-    // Use 60 Hz as the lower reference and 120 Hz as the pivot, then add the
-    // high-refresh completion floor separately from the preset spacing. This
-    // makes 120 Hz and 240 Hz perceived speed line up without multiplying all
-    // high-refresh presets into the same near-instant range.
-    double refreshDelta = refreshRatio - 1.0;
-    double lowRefreshScale = gestureVelocityReferenceRefreshRateHz / gestureVelocityLowRefreshReferenceHz;
-    double completionFloor = nonInstantGestureVelocityFloor * lowRefreshScale + 120.0 * refreshDelta;
-    double presetSlope = lowRefreshScale + 0.5 * refreshDelta;
-    double presetOffset = velocity - nonInstantGestureVelocityFloor;
-    if (presetOffset < 0.0) {
-        presetOffset = 0.0;
-    }
-
-    double normalizedVelocity = completionFloor + presetOffset * presetSlope;
+    double normalizedVelocity = velocity * refreshRatio;
     return normalizedVelocity < instantGestureVelocity ? normalizedVelocity : instantGestureVelocity;
 }
 
