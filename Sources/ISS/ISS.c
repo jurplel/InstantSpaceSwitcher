@@ -120,6 +120,20 @@ double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double r
     return normalizedVelocity < instantGestureVelocity ? normalizedVelocity : instantGestureVelocity;
 }
 
+double iss_dock_swipe_velocity_for_phase(double velocity, double refreshRate, int phase) {
+    double normalizedVelocity = iss_normalize_gesture_velocity_for_refresh_rate(velocity, refreshRate);
+
+    // Dock uses the final phase as the commit impulse. Keep animation phases tuned
+    // by refresh rate, but end with an instant-strength velocity so low-speed
+    // presets do not wait before the Space transition is committed.
+    if (phase == kCGSGesturePhaseEnded && normalizedVelocity > 0.0 &&
+        normalizedVelocity < instantGestureVelocity) {
+        return instantGestureVelocity;
+    }
+
+    return normalizedVelocity;
+}
+
 // Perform a swipe-override switch: get space info, compute target, switch,
 // and notify the handler with the target index.
 static void swipe_override_switch(ISSDirection dir) {
@@ -473,7 +487,7 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
 
 static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
     const bool isRight = (direction == ISSDirectionRight);
-    // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant.
+    // Keep progress near zero; velocity controls animation speed and final commit.
     const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
 
     // Velocity of gesture based on speed setting
@@ -496,17 +510,21 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
 }
 
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
+    double refreshRate = 0.0;
     CGDirectDisplayID display = 0;
     if (iss_get_cursor_display(&display)) {
-        double refreshRate = iss_refresh_rate_for_display(display);
-        velocity = iss_normalize_gesture_velocity_for_refresh_rate(velocity, refreshRate);
+        refreshRate = iss_refresh_rate_for_display(display);
     }
+
+    double beganVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseBegan);
+    double changedVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseChanged);
+    double endedVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseEnded);
 
     // Send three gesture events--began, changed, and ended
     // If we only send two then mission control doesn't work.
-    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction, velocity);
+    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, beganVelocity)
+        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, changedVelocity)
+        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction, endedVelocity);
 }
 
 /** @brief Walks a CGWindowListCopyWindowInfo result

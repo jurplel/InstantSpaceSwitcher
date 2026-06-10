@@ -12,6 +12,9 @@ private func iss_is_mission_control_detected_in_window_list(_ windowList: CFArra
 
 @_silgen_name("iss_normalize_gesture_velocity_for_refresh_rate")
 private func iss_normalize_gesture_velocity_for_refresh_rate(_ velocity: Double, _ refreshRate: Double) -> Double
+
+@_silgen_name("iss_dock_swipe_velocity_for_phase")
+private func iss_dock_swipe_velocity_for_phase(_ velocity: Double, _ refreshRate: Double, _ phase: Int32) -> Double
 //
 // Window structures are hardcoded from real probe output (expose_probe.c) captured
 // on macOS Sequoia with two displays (1920x1080 primary, 1728x1117 secondary).
@@ -241,6 +244,10 @@ final class OverlayDetectionTests: XCTestCase {
 }
 
 final class GestureVelocityTests: XCTestCase {
+    private let gesturePhaseBegan: Int32 = 1
+    private let gesturePhaseChanged: Int32 = 2
+    private let gesturePhaseEnded: Int32 = 4
+
     func testVelocityIsUnchangedAtReferenceRefreshRate() {
         XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 120.0), 80.0, accuracy: 0.0001)
         XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 120.0), 60.0, accuracy: 0.0001)
@@ -304,5 +311,45 @@ final class GestureVelocityTests: XCTestCase {
                 XCTAssertGreaterThan(normalized[index], normalized[index - 1])
             }
         }
+    }
+
+    func testAnimationPhasesUseRefreshNormalizedVelocity() {
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(60.0, 120.0, gesturePhaseBegan), 60.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(60.0, 120.0, gesturePhaseChanged), 60.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(60.0, 240.0, gesturePhaseChanged), 120.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(80.0, 240.0, gesturePhaseChanged), 160.0, accuracy: 0.0001)
+    }
+
+    func testEndedPhaseUsesInstantCommitVelocityForNonInstantPresets() {
+        let presets = [40.0, 50.0, 60.0, 80.0]
+
+        for refreshRate in [60.0, 120.0, 144.0, 240.0, 360.0] {
+            for preset in presets {
+                let changed = iss_dock_swipe_velocity_for_phase(preset, refreshRate, gesturePhaseChanged)
+                let ended = iss_dock_swipe_velocity_for_phase(preset, refreshRate, gesturePhaseEnded)
+
+                XCTAssertLessThan(changed, ended)
+                XCTAssertEqual(ended, 2000.0, accuracy: 0.0001)
+            }
+        }
+    }
+
+    func testInstantPresetRemainsInstantForAllPhases() {
+        for refreshRate in [120.0, 240.0] {
+            XCTAssertEqual(iss_dock_swipe_velocity_for_phase(2000.0, refreshRate, gesturePhaseBegan), 2000.0, accuracy: 0.0001)
+            XCTAssertEqual(iss_dock_swipe_velocity_for_phase(2000.0, refreshRate, gesturePhaseChanged), 2000.0, accuracy: 0.0001)
+            XCTAssertEqual(iss_dock_swipe_velocity_for_phase(2000.0, refreshRate, gesturePhaseEnded), 2000.0, accuracy: 0.0001)
+        }
+    }
+
+    func testMultiSpaceVelocityAboveInstantIsNotReducedForAnyPhase() {
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(4000.0, 240.0, gesturePhaseBegan), 4000.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(4000.0, 240.0, gesturePhaseChanged), 4000.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(4000.0, 240.0, gesturePhaseEnded), 4000.0, accuracy: 0.0001)
+    }
+
+    func testUnknownRefreshRateKeepsAnimationVelocityButStillCommitsImmediately() {
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(60.0, 0.0, gesturePhaseChanged), 60.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_velocity_for_phase(60.0, 0.0, gesturePhaseEnded), 2000.0, accuracy: 0.0001)
     }
 }
