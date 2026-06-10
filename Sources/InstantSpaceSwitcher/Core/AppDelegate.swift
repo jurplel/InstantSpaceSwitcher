@@ -28,6 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    ensureEventPermissions()
+
     if !iss_init() {
       print("Failed to initialize ISS event tap")
       retryIssInit()
@@ -71,6 +73,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     guard !iss_init() else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
       self?.retryIssInit()
+    }
+  }
+
+  private func ensureEventPermissions() {
+    if !AXIsProcessTrusted() {
+      let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+      let options = [promptKey: true] as CFDictionary
+      _ = AXIsProcessTrustedWithOptions(options)
+    }
+
+    if #available(macOS 10.15, *) {
+      if !CGPreflightPostEventAccess() {
+        _ = CGRequestPostEventAccess()
+      }
+
+      if !CGPreflightListenEventAccess() {
+        _ = CGRequestListenEventAccess()
+      }
     }
   }
 
