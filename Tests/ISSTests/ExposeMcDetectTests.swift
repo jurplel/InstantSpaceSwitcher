@@ -245,8 +245,9 @@ final class GestureVelocityTests: XCTestCase {
         XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 120.0), 80.0, accuracy: 0.0001)
     }
 
-    func testVelocityIsUnchangedBelowReferenceRefreshRate() {
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 60.0), 80.0, accuracy: 0.0001)
+    func testVelocityScalesBelowReferenceRefreshRate() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 60.0), 40.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 90.0), 45.0, accuracy: 0.0001)
     }
 
     func testAllPresetVelocitiesScaleAboveReferenceRefreshRate() {
@@ -293,7 +294,7 @@ final class GestureVelocityTests: XCTestCase {
     func testPresetOrderIsPreservedAcrossSupportedRefreshRates() {
         let presets = [40.0, 50.0, 60.0, 80.0, 2000.0]
 
-        for refreshRate in [60.0, 120.0, 144.0, 165.0, 240.0, 360.0] {
+        for refreshRate in [30.0, 60.0, 75.0, 90.0, 120.0, 144.0, 165.0, 240.0, 360.0] {
             let normalized = presets.map {
                 iss_normalize_gesture_velocity_for_refresh_rate($0, refreshRate)
             }

@@ -112,15 +112,19 @@ static double iss_refresh_rate_for_display(CGDirectDisplayID display);
 
 double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double refreshRate) {
     // Instant and deliberately higher multi-space velocities need no refresh compensation.
-    if (refreshRate <= gestureVelocityReferenceRefreshRateHz || velocity >= instantGestureVelocity) {
+    if (refreshRate <= 0.0 || velocity >= instantGestureVelocity) {
         return velocity;
     }
 
-    // Preserve <=120 Hz behavior, then add the high-refresh completion floor
+    double refreshRatio = refreshRate / gestureVelocityReferenceRefreshRateHz;
+    if (refreshRate <= gestureVelocityReferenceRefreshRateHz) {
+        return velocity * refreshRatio;
+    }
+
+    // Preserve the 120 Hz baseline, then add the high-refresh completion floor
     // separately from the preset spacing. This keeps non-instant presets
     // perceptually distinct instead of multiplying the whole scale into the
     // same near-instant range.
-    double refreshRatio = refreshRate / gestureVelocityReferenceRefreshRateHz;
     double refreshDelta = refreshRatio - 1.0;
     double completionFloor = nonInstantGestureVelocityFloor + 160.0 * refreshDelta;
     double presetSlope = 1.0 + 1.5 * refreshDelta;
