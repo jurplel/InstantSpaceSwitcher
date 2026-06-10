@@ -252,9 +252,9 @@ final class GestureVelocityTests: XCTestCase {
     func testAllPresetVelocitiesScaleAboveReferenceRefreshRate() {
         let presets: [(input: Double, expected: Double)] = [
             (40.0, 200.0),
-            (50.0, 250.0),
-            (60.0, 300.0),
-            (80.0, 400.0),
+            (50.0, 225.0),
+            (60.0, 250.0),
+            (80.0, 300.0),
             (2000.0, 2000.0),
         ]
 
@@ -271,8 +271,19 @@ final class GestureVelocityTests: XCTestCase {
         XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 0.0), 80.0, accuracy: 0.0001)
     }
 
+    func testNonInstantVelocityDoesNotReachInstantAtCommonHighRefreshRates() {
+        for refreshRate in [144.0, 165.0, 240.0, 360.0] {
+            XCTAssertLessThan(iss_normalize_gesture_velocity_for_refresh_rate(80.0, refreshRate), 2000.0)
+        }
+    }
+
     func testNonInstantVelocityDoesNotExceedInstantPreset() {
-        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 1000.0), 2000.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 2000.0), 2000.0, accuracy: 0.0001)
+    }
+
+    func testFasterPresetStaysBelowPreviousFastestCompensationAt240Hz() {
+        XCTAssertLessThan(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 240.0), 300.0)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 240.0), 300.0, accuracy: 0.0001)
     }
 
     func testMultiSpaceVelocityAboveInstantIsUnchanged() {
