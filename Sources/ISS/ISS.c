@@ -68,6 +68,8 @@ static bool swipeFired = false;
 static double gestureSpeed = 2000.0;
 static const double gestureVelocityReferenceRefreshRateHz = 120.0;
 static const double instantGestureVelocity = 2000.0;
+static const double gestureProgressVelocityDivisor = 480.0;
+static const double gestureMaximumProgress = 0.8;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -121,17 +123,21 @@ double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double r
 }
 
 double iss_dock_swipe_velocity_for_phase(double velocity, double refreshRate, int phase) {
-    double normalizedVelocity = iss_normalize_gesture_velocity_for_refresh_rate(velocity, refreshRate);
+    (void)phase;
+    return iss_normalize_gesture_velocity_for_refresh_rate(velocity, refreshRate);
+}
 
-    // Dock uses the final phase as the commit impulse. Keep animation phases tuned
-    // by refresh rate, but end with an instant-strength velocity so low-speed
-    // presets do not wait before the Space transition is committed.
-    if (phase == kCGSGesturePhaseEnded && normalizedVelocity > 0.0 &&
-        normalizedVelocity < instantGestureVelocity) {
-        return instantGestureVelocity;
+double iss_dock_swipe_progress_for_phase(double velocity, int phase) {
+    if (phase == kCGSGesturePhaseBegan || velocity <= 0.0 || velocity >= instantGestureVelocity) {
+        return (double)FLT_TRUE_MIN;
     }
 
-    return normalizedVelocity;
+    double progress = velocity / gestureProgressVelocityDivisor;
+    if (progress > gestureMaximumProgress) {
+        return gestureMaximumProgress;
+    }
+
+    return progress > (double)FLT_TRUE_MIN ? progress : (double)FLT_TRUE_MIN;
 }
 
 // Perform a swipe-override switch: get space info, compute target, switch,
@@ -485,10 +491,12 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
     return !iss_should_block_switch(&info, direction);
 }
 
-static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
+static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction,
+                                double velocity, double progressMagnitude) {
     const bool isRight = (direction == ISSDirectionRight);
-    // Keep progress near zero; velocity controls animation speed and final commit.
-    const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
+    // Velocity controls animation speed; progress gives Dock enough swipe distance
+    // to commit non-instant gestures without upgrading them to Instant velocity.
+    const double progress = isRight ? progressMagnitude : -progressMagnitude;
 
     // Velocity of gesture based on speed setting
     const double vel = isRight ? velocity : -velocity;
@@ -519,12 +527,15 @@ static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) 
     double beganVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseBegan);
     double changedVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseChanged);
     double endedVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseEnded);
+    double beganProgress = iss_dock_swipe_progress_for_phase(beganVelocity, kCGSGesturePhaseBegan);
+    double changedProgress = iss_dock_swipe_progress_for_phase(changedVelocity, kCGSGesturePhaseChanged);
+    double endedProgress = iss_dock_swipe_progress_for_phase(endedVelocity, kCGSGesturePhaseEnded);
 
     // Send three gesture events--began, changed, and ended
     // If we only send two then mission control doesn't work.
-    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, beganVelocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, changedVelocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction, endedVelocity);
+    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, beganVelocity,   beganProgress)
+        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, changedVelocity, changedProgress)
+        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction, endedVelocity,   endedProgress);
 }
 
 /** @brief Walks a CGWindowListCopyWindowInfo result
