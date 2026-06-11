@@ -66,8 +66,10 @@ static bool swipeFired = false;
 
 // Gesture speed state
 static double gestureSpeed = 2000.0;
-static const double gestureVelocityReferenceRefreshRateHz = 120.0;
+static const double nonInstantGestureVelocityFloor = 40.0;
+static const double dockGestureActivationVelocityFloor = 80.0;
 static const double instantGestureVelocity = 2000.0;
+static const double nonInstantGestureVelocityCeiling = 1999.0;
 static const double gestureProgressVelocityDivisor = 480.0;
 static const double gestureMaximumProgress = 0.8;
 
@@ -108,23 +110,28 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
-static bool iss_get_cursor_display(CGDirectDisplayID *outDisplay);
-static double iss_refresh_rate_for_display(CGDirectDisplayID display);
 
-double iss_normalize_gesture_velocity_for_refresh_rate(double velocity, double refreshRate) {
-    // Instant and deliberately higher multi-space velocities need no refresh compensation.
-    if (refreshRate <= 0.0 || velocity >= instantGestureVelocity) {
+double iss_normalize_gesture_velocity(double velocity) {
+    if (velocity <= 0.0 || velocity >= instantGestureVelocity) {
         return velocity;
     }
 
-    double refreshRatio = refreshRate / gestureVelocityReferenceRefreshRateHz;
-    double normalizedVelocity = velocity * refreshRatio;
-    return normalizedVelocity < instantGestureVelocity ? normalizedVelocity : instantGestureVelocity;
+    // Dock has a shared non-instant completion threshold across displays. Keep
+    // preset spacing, but move the whole non-instant range above that threshold.
+    double presetOffset = velocity - nonInstantGestureVelocityFloor;
+    if (presetOffset < 0.0) {
+        presetOffset = 0.0;
+    }
+
+    double normalizedVelocity = dockGestureActivationVelocityFloor + presetOffset;
+    return normalizedVelocity < instantGestureVelocity
+        ? normalizedVelocity
+        : nonInstantGestureVelocityCeiling;
 }
 
-double iss_dock_swipe_velocity_for_phase(double velocity, double refreshRate, int phase) {
+double iss_dock_swipe_velocity_for_phase(double velocity, int phase) {
     (void)phase;
-    return iss_normalize_gesture_velocity_for_refresh_rate(velocity, refreshRate);
+    return iss_normalize_gesture_velocity(velocity);
 }
 
 double iss_dock_swipe_progress_for_phase(double velocity, int phase) {
@@ -433,42 +440,6 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
     return success;
 }
 
-static bool iss_get_cursor_display(CGDirectDisplayID *outDisplay) {
-    if (!outDisplay) {
-        return false;
-    }
-
-    CGEventRef tempEvent = CGEventCreate(NULL);
-    if (!tempEvent) {
-        return false;
-    }
-
-    CGPoint cursorLocation = CGEventGetLocation(tempEvent);
-    CFRelease(tempEvent);
-
-    CGDirectDisplayID cursorDisplay = 0;
-    uint32_t cursorDisplayCount = 0;
-    CGError result = CGGetDisplaysWithPoint(cursorLocation, 1, &cursorDisplay, &cursorDisplayCount);
-    if (result != kCGErrorSuccess || cursorDisplayCount == 0) {
-        return false;
-    }
-
-    *outDisplay = cursorDisplay;
-    return true;
-}
-
-static double iss_refresh_rate_for_display(CGDirectDisplayID display) {
-    double refreshRate = 0.0;
-
-    CGDisplayModeRef displayMode = CGDisplayCopyDisplayMode(display);
-    if (displayMode) {
-        refreshRate = CGDisplayModeGetRefreshRate(displayMode);
-        CGDisplayModeRelease(displayMode);
-    }
-
-    return refreshRate;
-}
-
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction) {
     if (!info) {
         return false;
@@ -518,15 +489,9 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction,
 }
 
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
-    double refreshRate = 0.0;
-    CGDirectDisplayID display = 0;
-    if (iss_get_cursor_display(&display)) {
-        refreshRate = iss_refresh_rate_for_display(display);
-    }
-
-    double beganVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseBegan);
-    double changedVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseChanged);
-    double endedVelocity = iss_dock_swipe_velocity_for_phase(velocity, refreshRate, kCGSGesturePhaseEnded);
+    double beganVelocity = iss_dock_swipe_velocity_for_phase(velocity, kCGSGesturePhaseBegan);
+    double changedVelocity = iss_dock_swipe_velocity_for_phase(velocity, kCGSGesturePhaseChanged);
+    double endedVelocity = iss_dock_swipe_velocity_for_phase(velocity, kCGSGesturePhaseEnded);
     double beganProgress = iss_dock_swipe_progress_for_phase(beganVelocity, kCGSGesturePhaseBegan);
     double changedProgress = iss_dock_swipe_progress_for_phase(changedVelocity, kCGSGesturePhaseChanged);
     double endedProgress = iss_dock_swipe_progress_for_phase(endedVelocity, kCGSGesturePhaseEnded);
