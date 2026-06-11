@@ -254,9 +254,9 @@ final class GestureVelocityTests: XCTestCase {
     func testAllPresetsUseSharedActivationCurve() {
         let presets: [(input: Double, expected: Double)] = [
             (40.0, 80.0),
-            (50.0, 110.0),
-            (60.0, 140.0),
-            (80.0, 200.0),
+            (50.0, 140.0),
+            (60.0, 220.0),
+            (80.0, 440.0),
             (2000.0, 2000.0),
         ]
 
@@ -266,9 +266,9 @@ final class GestureVelocityTests: XCTestCase {
     }
 
     func testNonInstantVelocityUsesFormulaInsteadOfPresetMapping() {
-        XCTAssertEqual(iss_normalize_gesture_velocity(45.0), 95.0, accuracy: 0.0001)
-        XCTAssertEqual(iss_normalize_gesture_velocity(70.0), 170.0, accuracy: 0.0001)
-        XCTAssertEqual(iss_normalize_gesture_velocity(125.0), 335.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity(45.0), 107.5, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity(70.0), 320.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity(125.0), 1227.5, accuracy: 0.0001)
     }
 
     func testVelocityBelowPresetRangeUsesActivationFloor() {
@@ -326,15 +326,15 @@ final class GestureVelocityTests: XCTestCase {
         XCTAssertLessThan(iss_dock_swipe_progress_for_phase(100.0, gesturePhaseBegan), 0.0001)
     }
 
-    func testChangedAndEndedProgressScaleWithVelocity() {
-        XCTAssertEqual(iss_dock_swipe_progress_for_phase(80.0, gesturePhaseChanged), 1.0 / 6.0, accuracy: 0.0001)
-        XCTAssertEqual(iss_dock_swipe_progress_for_phase(140.0, gesturePhaseEnded), 7.0 / 24.0, accuracy: 0.0001)
-        XCTAssertEqual(iss_dock_swipe_progress_for_phase(200.0, gesturePhaseChanged), 5.0 / 12.0, accuracy: 0.0001)
+    func testChangedAndEndedProgressIsConstantForNonInstantVelocity() {
+        XCTAssertEqual(iss_dock_swipe_progress_for_phase(80.0, gesturePhaseChanged), 0.35, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_progress_for_phase(220.0, gesturePhaseEnded), 0.35, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_progress_for_phase(440.0, gesturePhaseChanged), 0.35, accuracy: 0.0001)
     }
 
-    func testProgressIsCappedBelowFullSwipeDistance() {
-        XCTAssertEqual(iss_dock_swipe_progress_for_phase(1000.0, gesturePhaseChanged), 0.8, accuracy: 0.0001)
-        XCTAssertEqual(iss_dock_swipe_progress_for_phase(1999.0, gesturePhaseEnded), 0.8, accuracy: 0.0001)
+    func testProgressIsConstantForNonInstantVelocity() {
+        XCTAssertEqual(iss_dock_swipe_progress_for_phase(1000.0, gesturePhaseChanged), 0.35, accuracy: 0.0001)
+        XCTAssertEqual(iss_dock_swipe_progress_for_phase(1999.0, gesturePhaseEnded), 0.35, accuracy: 0.0001)
     }
 
     func testInstantAndMultiSpaceVelocityUseMinimalProgress() {

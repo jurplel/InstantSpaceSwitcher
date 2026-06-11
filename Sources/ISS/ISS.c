@@ -68,11 +68,11 @@ static bool swipeFired = false;
 static double gestureSpeed = 2000.0;
 static const double nonInstantGestureVelocityFloor = 40.0;
 static const double dockGestureActivationVelocityFloor = 80.0;
-static const double nonInstantGestureVelocitySpacingMultiplier = 3.0;
+static const double nonInstantGestureVelocityLinearMultiplier = 5.0;
+static const double nonInstantGestureVelocityQuadraticMultiplier = 0.1;
 static const double instantGestureVelocity = 2000.0;
 static const double nonInstantGestureVelocityCeiling = 1999.0;
-static const double gestureProgressVelocityDivisor = 480.0;
-static const double gestureMaximumProgress = 0.8;
+static const double nonInstantGestureProgress = 0.35;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -118,8 +118,8 @@ double iss_normalize_gesture_velocity(double velocity) {
     }
 
     // Dock has a shared non-instant completion threshold across displays. Move
-    // the non-instant range above that threshold, then widen preset spacing so
-    // Fast/Faster/Fastest remain visually distinct.
+    // the non-instant range above that threshold, then use a curved spacing so
+    // Fast/Faster/Fastest do not collapse into the same post-threshold band.
     double presetOffset = velocity - nonInstantGestureVelocityFloor;
     if (presetOffset < 0.0) {
         presetOffset = 0.0;
@@ -127,7 +127,8 @@ double iss_normalize_gesture_velocity(double velocity) {
 
     double normalizedVelocity =
         dockGestureActivationVelocityFloor +
-        presetOffset * nonInstantGestureVelocitySpacingMultiplier;
+        presetOffset * nonInstantGestureVelocityLinearMultiplier +
+        presetOffset * presetOffset * nonInstantGestureVelocityQuadraticMultiplier;
     return normalizedVelocity < instantGestureVelocity
         ? normalizedVelocity
         : nonInstantGestureVelocityCeiling;
@@ -143,12 +144,7 @@ double iss_dock_swipe_progress_for_phase(double velocity, int phase) {
         return (double)FLT_TRUE_MIN;
     }
 
-    double progress = velocity / gestureProgressVelocityDivisor;
-    if (progress > gestureMaximumProgress) {
-        return gestureMaximumProgress;
-    }
-
-    return progress > (double)FLT_TRUE_MIN ? progress : (double)FLT_TRUE_MIN;
+    return nonInstantGestureProgress;
 }
 
 // Perform a swipe-override switch: get space info, compute target, switch,
