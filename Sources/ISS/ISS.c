@@ -73,6 +73,7 @@ static const double nonInstantGestureVelocityQuadraticMultiplier = 0.0175;
 static const double instantGestureVelocity = 2000.0;
 static const double nonInstantGestureVelocityCeiling = 1999.0;
 static const double nonInstantGestureProgress = 0.09;
+static const double nonInstantGestureProgressCeiling = 0.35;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -194,7 +195,12 @@ double iss_dock_swipe_progress_for_phase_and_refresh_rate(double velocity,
         return (double)FLT_TRUE_MIN;
     }
 
-    return nonInstantGestureProgress;
+    double progress =
+        nonInstantGestureProgress
+        * iss_refresh_rate_normalization_scale(displayRefreshRate, baselineRefreshRate);
+    return progress < nonInstantGestureProgressCeiling
+        ? progress
+        : nonInstantGestureProgressCeiling;
 }
 
 double iss_dock_swipe_progress_for_phase(double velocity, int phase) {

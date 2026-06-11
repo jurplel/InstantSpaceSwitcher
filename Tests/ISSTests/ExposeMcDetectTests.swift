@@ -388,20 +388,37 @@ final class GestureVelocityTests: XCTestCase {
         XCTAssertEqual(iss_dock_swipe_progress_for_phase(86.0, gesturePhaseChanged), 0.09, accuracy: 0.0001)
     }
 
-    func testProgressDoesNotScaleWithRefreshRate() {
+    func testProgressScalesWithRefreshRateForActivation() {
         XCTAssertEqual(
             iss_dock_swipe_progress_for_phase_and_refresh_rate(50.0, gesturePhaseChanged, 240.0, 120.0),
-            0.09,
+            0.18,
             accuracy: 0.0001
         )
         XCTAssertEqual(
             iss_dock_swipe_progress_for_phase_and_refresh_rate(80.0, gesturePhaseEnded, 180.0, 120.0),
+            0.135,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            iss_dock_swipe_progress_for_phase_and_refresh_rate(50.0, gesturePhaseChanged, 0.0, 120.0),
             0.09,
             accuracy: 0.0001
         )
         XCTAssertLessThan(
             iss_dock_swipe_progress_for_phase_and_refresh_rate(40.0, gesturePhaseChanged, 240.0, 120.0),
             0.0001
+        )
+        XCTAssertLessThan(
+            iss_dock_swipe_progress_for_phase_and_refresh_rate(2000.0, gesturePhaseChanged, 240.0, 120.0),
+            0.0001
+        )
+    }
+
+    func testScaledProgressIsCappedBelowAggressiveSwipeProgress() {
+        XCTAssertEqual(
+            iss_dock_swipe_progress_for_phase_and_refresh_rate(80.0, gesturePhaseChanged, 480.0, 60.0),
+            0.35,
+            accuracy: 0.0001
         )
     }
 
