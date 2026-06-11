@@ -68,6 +68,7 @@ static bool swipeFired = false;
 static double gestureSpeed = 2000.0;
 static const double nonInstantGestureVelocityFloor = 40.0;
 static const double dockGestureActivationVelocityFloor = 80.0;
+static const double nonInstantGestureVelocitySpacingMultiplier = 3.0;
 static const double instantGestureVelocity = 2000.0;
 static const double nonInstantGestureVelocityCeiling = 1999.0;
 static const double gestureProgressVelocityDivisor = 480.0;
@@ -116,14 +117,17 @@ double iss_normalize_gesture_velocity(double velocity) {
         return velocity;
     }
 
-    // Dock has a shared non-instant completion threshold across displays. Keep
-    // preset spacing, but move the whole non-instant range above that threshold.
+    // Dock has a shared non-instant completion threshold across displays. Move
+    // the non-instant range above that threshold, then widen preset spacing so
+    // Fast/Faster/Fastest remain visually distinct.
     double presetOffset = velocity - nonInstantGestureVelocityFloor;
     if (presetOffset < 0.0) {
         presetOffset = 0.0;
     }
 
-    double normalizedVelocity = dockGestureActivationVelocityFloor + presetOffset;
+    double normalizedVelocity =
+        dockGestureActivationVelocityFloor +
+        presetOffset * nonInstantGestureVelocitySpacingMultiplier;
     return normalizedVelocity < instantGestureVelocity
         ? normalizedVelocity
         : nonInstantGestureVelocityCeiling;
