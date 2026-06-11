@@ -13,11 +13,37 @@ private func iss_is_mission_control_detected_in_window_list(_ windowList: CFArra
 @_silgen_name("iss_normalize_gesture_velocity")
 private func iss_normalize_gesture_velocity(_ velocity: Double) -> Double
 
+@_silgen_name("iss_refresh_rate_normalization_scale")
+private func iss_refresh_rate_normalization_scale(_ displayRefreshRate: Double, _ baselineRefreshRate: Double) -> Double
+
+@_silgen_name("iss_normalize_gesture_velocity_for_refresh_rate")
+private func iss_normalize_gesture_velocity_for_refresh_rate(
+    _ velocity: Double,
+    _ displayRefreshRate: Double,
+    _ baselineRefreshRate: Double
+) -> Double
+
 @_silgen_name("iss_dock_swipe_velocity_for_phase")
 private func iss_dock_swipe_velocity_for_phase(_ velocity: Double, _ phase: Int32) -> Double
 
+@_silgen_name("iss_dock_swipe_velocity_for_phase_and_refresh_rate")
+private func iss_dock_swipe_velocity_for_phase_and_refresh_rate(
+    _ velocity: Double,
+    _ phase: Int32,
+    _ displayRefreshRate: Double,
+    _ baselineRefreshRate: Double
+) -> Double
+
 @_silgen_name("iss_dock_swipe_progress_for_phase")
 private func iss_dock_swipe_progress_for_phase(_ velocity: Double, _ phase: Int32) -> Double
+
+@_silgen_name("iss_dock_swipe_progress_for_phase_and_refresh_rate")
+private func iss_dock_swipe_progress_for_phase_and_refresh_rate(
+    _ velocity: Double,
+    _ phase: Int32,
+    _ displayRefreshRate: Double,
+    _ baselineRefreshRate: Double
+) -> Double
 //
 // Window structures are hardcoded from real probe output (expose_probe.c) captured
 // on macOS Sequoia with two displays (1920x1080 primary, 1728x1117 secondary).
@@ -271,6 +297,29 @@ final class GestureVelocityTests: XCTestCase {
         XCTAssertEqual(iss_normalize_gesture_velocity(125.0), 204.6875, accuracy: 0.0001)
     }
 
+    func testRefreshNormalizationUsesBaselineRatio() {
+        XCTAssertEqual(iss_refresh_rate_normalization_scale(120.0, 120.0), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_refresh_rate_normalization_scale(240.0, 120.0), 2.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_refresh_rate_normalization_scale(180.0, 120.0), 1.5, accuracy: 0.0001)
+    }
+
+    func testUnknownRefreshRateUsesUnscaledVelocity() {
+        XCTAssertEqual(iss_refresh_rate_normalization_scale(0.0, 120.0), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_refresh_rate_normalization_scale(120.0, 0.0), 1.0, accuracy: 0.0001)
+    }
+
+    func testNonInstantVelocityScalesForHighRefreshDisplay() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(40.0, 240.0, 120.0), 40.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(50.0, 240.0, 120.0), 52.5, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(60.0, 240.0, 120.0), 72.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(80.0, 240.0, 120.0), 132.0, accuracy: 0.0001)
+    }
+
+    func testNonInstantVelocityScalesOffsetOnlyForLowRefreshDisplay() {
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(40.0, 60.0, 120.0), 40.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(50.0, 60.0, 120.0), 43.125, accuracy: 0.0001)
+    }
+
     func testVelocityBelowPresetRangeUsesActivationFloor() {
         XCTAssertEqual(iss_normalize_gesture_velocity(1.0), 40.0, accuracy: 0.0001)
         XCTAssertEqual(iss_normalize_gesture_velocity(39.0), 40.0, accuracy: 0.0001)
@@ -284,6 +333,8 @@ final class GestureVelocityTests: XCTestCase {
     func testInstantAndHigherVelocityAreUnchanged() {
         XCTAssertEqual(iss_normalize_gesture_velocity(2000.0), 2000.0, accuracy: 0.0001)
         XCTAssertEqual(iss_normalize_gesture_velocity(4000.0), 4000.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(2000.0, 240.0, 120.0), 2000.0, accuracy: 0.0001)
+        XCTAssertEqual(iss_normalize_gesture_velocity_for_refresh_rate(4000.0, 240.0, 120.0), 4000.0, accuracy: 0.0001)
     }
 
     func testPresetOrderIsPreserved() {
@@ -335,6 +386,23 @@ final class GestureVelocityTests: XCTestCase {
         XCTAssertEqual(iss_dock_swipe_progress_for_phase(46.25, gesturePhaseChanged), 0.09, accuracy: 0.0001)
         XCTAssertEqual(iss_dock_swipe_progress_for_phase(56.0, gesturePhaseEnded), 0.09, accuracy: 0.0001)
         XCTAssertEqual(iss_dock_swipe_progress_for_phase(86.0, gesturePhaseChanged), 0.09, accuracy: 0.0001)
+    }
+
+    func testProgressDoesNotScaleWithRefreshRate() {
+        XCTAssertEqual(
+            iss_dock_swipe_progress_for_phase_and_refresh_rate(50.0, gesturePhaseChanged, 240.0, 120.0),
+            0.09,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            iss_dock_swipe_progress_for_phase_and_refresh_rate(80.0, gesturePhaseEnded, 180.0, 120.0),
+            0.09,
+            accuracy: 0.0001
+        )
+        XCTAssertLessThan(
+            iss_dock_swipe_progress_for_phase_and_refresh_rate(40.0, gesturePhaseChanged, 240.0, 120.0),
+            0.0001
+        )
     }
 
     func testProgressIsConstantForNonInstantVelocity() {
