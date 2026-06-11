@@ -70,10 +70,11 @@ static double gestureSpeed = 2000.0;
 static const double nonInstantGestureVelocityFloor = 40.0;
 static const double nonInstantGestureVelocityLinearMultiplier = 0.45;
 static const double nonInstantGestureVelocityQuadraticMultiplier = 0.0175;
+static const double nonInstantGestureCommitVelocityFloor = 80.0;
 static const double instantGestureVelocity = 2000.0;
 static const double nonInstantGestureVelocityCeiling = 1999.0;
 static const double nonInstantGestureProgress = 0.09;
-static const double nonInstantGestureProgressCeiling = 0.35;
+static const double nonInstantGestureCommitProgress = 0.35;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -112,6 +113,10 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity, const char *displayID);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
+double iss_dock_swipe_velocity_for_phase_and_refresh_rate(double velocity,
+                                                          int phase,
+                                                          double displayRefreshRate,
+                                                          double baselineRefreshRate);
 
 static double iss_base_gesture_velocity(double velocity) {
     if (velocity <= 0.0 || velocity >= instantGestureVelocity) {
@@ -169,20 +174,37 @@ double iss_normalize_gesture_velocity(double velocity) {
 }
 
 double iss_dock_swipe_velocity_for_phase(double velocity, int phase) {
-    (void)phase;
-    return iss_normalize_gesture_velocity(velocity);
+    return iss_dock_swipe_velocity_for_phase_and_refresh_rate(velocity, phase, 0.0, 0.0);
 }
 
 double iss_dock_swipe_velocity_for_phase_and_refresh_rate(double velocity,
                                                           int phase,
                                                           double displayRefreshRate,
                                                           double baselineRefreshRate) {
-    (void)phase;
-    return iss_normalize_gesture_velocity_for_refresh_rate(
+    double normalizedVelocity = iss_normalize_gesture_velocity_for_refresh_rate(
         velocity,
         displayRefreshRate,
         baselineRefreshRate
     );
+
+    if (phase != kCGSGesturePhaseEnded
+        || velocity <= nonInstantGestureVelocityFloor
+        || velocity >= instantGestureVelocity) {
+        return normalizedVelocity;
+    }
+
+    double refreshScale = iss_refresh_rate_normalization_scale(displayRefreshRate, baselineRefreshRate);
+    if (refreshScale < 1.0) {
+        refreshScale = 1.0;
+    }
+    double commitVelocityFloor = nonInstantGestureCommitVelocityFloor * refreshScale;
+    if (commitVelocityFloor >= instantGestureVelocity) {
+        commitVelocityFloor = nonInstantGestureVelocityCeiling;
+    }
+
+    return normalizedVelocity > commitVelocityFloor
+        ? normalizedVelocity
+        : commitVelocityFloor;
 }
 
 double iss_dock_swipe_progress_for_phase_and_refresh_rate(double velocity,
@@ -195,14 +217,11 @@ double iss_dock_swipe_progress_for_phase_and_refresh_rate(double velocity,
         return (double)FLT_TRUE_MIN;
     }
 
-    double progress = nonInstantGestureProgress;
     if (phase == kCGSGesturePhaseEnded) {
-        double refreshScale = iss_refresh_rate_normalization_scale(displayRefreshRate, baselineRefreshRate);
-        progress *= refreshScale * refreshScale;
+        return nonInstantGestureCommitProgress;
     }
-    return progress < nonInstantGestureProgressCeiling
-        ? progress
-        : nonInstantGestureProgressCeiling;
+
+    return nonInstantGestureProgress;
 }
 
 double iss_dock_swipe_progress_for_phase(double velocity, int phase) {
