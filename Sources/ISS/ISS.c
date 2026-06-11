@@ -195,9 +195,11 @@ double iss_dock_swipe_progress_for_phase_and_refresh_rate(double velocity,
         return (double)FLT_TRUE_MIN;
     }
 
-    double progress =
-        nonInstantGestureProgress
-        * iss_refresh_rate_normalization_scale(displayRefreshRate, baselineRefreshRate);
+    double progress = nonInstantGestureProgress;
+    if (phase == kCGSGesturePhaseEnded) {
+        double refreshScale = iss_refresh_rate_normalization_scale(displayRefreshRate, baselineRefreshRate);
+        progress *= refreshScale * refreshScale;
+    }
     return progress < nonInstantGestureProgressCeiling
         ? progress
         : nonInstantGestureProgressCeiling;
