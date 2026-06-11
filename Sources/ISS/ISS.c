@@ -67,12 +67,12 @@ static bool swipeFired = false;
 // Gesture speed state
 static double gestureSpeed = 2000.0;
 static const double nonInstantGestureVelocityFloor = 40.0;
-static const double dockGestureActivationVelocityFloor = 80.0;
-static const double nonInstantGestureVelocityLinearMultiplier = 1.5;
-static const double nonInstantGestureVelocityQuadraticMultiplier = 0.1;
+static const double dockGestureActivationVelocityFloor = 70.0;
+static const double nonInstantGestureVelocityLinearMultiplier = 0.9;
+static const double nonInstantGestureVelocityQuadraticMultiplier = 0.035;
 static const double instantGestureVelocity = 2000.0;
 static const double nonInstantGestureVelocityCeiling = 1999.0;
-static const double nonInstantGestureProgress = 0.25;
+static const double nonInstantGestureProgress = 0.18;
 
 static ISSSwitchCallback switchCallback = NULL;
 
