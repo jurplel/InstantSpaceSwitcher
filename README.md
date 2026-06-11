@@ -21,6 +21,9 @@ A simple CLI is provided (`InstantSpaceSwitcher.app/Contents/MacOS/ISSCli --help
 brew install --cask jurplel/tap/instant-space-switcher
 ```
 
+After installation the app is located inside `/Applications/InstantSpaceSwitcher.app`
+
+
 ### Downloads
 
 Pre-built binaries are available through Github Releases [here](https://github.com/jurplel/InstantSpaceSwitcher/tags).
@@ -34,8 +37,10 @@ cd InstantSpaceSwitcher
 open ./build/InstantSpaceSwitcher.app
 ```
 
-### Troubleshooting
-If you encounter issues opening the app, such as:
+### Troubleshooting / First time startup
+
+1. When opening the app the first time you are likely to run into any of the following warnings:
+
 > "Apple could not verify InstantSpaceSwitcher.app is free of malware"
 
 > "App is damaged and can’t be opened"
@@ -43,6 +48,10 @@ If you encounter issues opening the app, such as:
 > "App can't be opened because the developer cannot be verified"
 
 Please follow the instructions [here](https://wiki.hacks.guide/wiki/Open_unsigned_applications_on_macOS_Sequoia_and_newer) for instructions on how to allow the app to run[^1].
+
+2. Afterward you will get a warning that InstantSpaceSwitcher wants to use accessibility features. You have to allow this.
+
+3. Then open the app from the Applications folder and the configuration window should appear.
 
 ## Background
 When I first bought a high refresh rate monitor, around ~2018, I could tell that the space switching animation was longer because it had scaled with the refresh rate. Because of this, I eventually stopped using spaces altogether, and have been looking for a solution ever since. 
