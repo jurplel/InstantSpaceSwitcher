@@ -67,12 +67,11 @@ static bool swipeFired = false;
 // Gesture speed state
 static double gestureSpeed = 2000.0;
 static const double nonInstantGestureVelocityFloor = 40.0;
-static const double dockGestureActivationVelocityFloor = 70.0;
-static const double nonInstantGestureVelocityLinearMultiplier = 0.9;
-static const double nonInstantGestureVelocityQuadraticMultiplier = 0.035;
+static const double nonInstantGestureVelocityLinearMultiplier = 0.45;
+static const double nonInstantGestureVelocityQuadraticMultiplier = 0.0175;
 static const double instantGestureVelocity = 2000.0;
 static const double nonInstantGestureVelocityCeiling = 1999.0;
-static const double nonInstantGestureProgress = 0.18;
+static const double nonInstantGestureProgress = 0.09;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -117,16 +116,16 @@ double iss_normalize_gesture_velocity(double velocity) {
         return velocity;
     }
 
-    // Dock has a shared non-instant completion threshold across displays. Move
-    // the non-instant range above that threshold, then use a curved spacing so
-    // Fast/Faster/Fastest do not collapse into the same post-threshold band.
+    // Keep Normal at the original raw gesture velocity, then use a shallow
+    // curved spacing so faster presets stay distinct without entering Dock's
+    // overly aggressive completion band.
     double presetOffset = velocity - nonInstantGestureVelocityFloor;
     if (presetOffset < 0.0) {
         presetOffset = 0.0;
     }
 
     double normalizedVelocity =
-        dockGestureActivationVelocityFloor +
+        nonInstantGestureVelocityFloor +
         presetOffset * nonInstantGestureVelocityLinearMultiplier +
         presetOffset * presetOffset * nonInstantGestureVelocityQuadraticMultiplier;
     return normalizedVelocity < instantGestureVelocity
@@ -140,7 +139,9 @@ double iss_dock_swipe_velocity_for_phase(double velocity, int phase) {
 }
 
 double iss_dock_swipe_progress_for_phase(double velocity, int phase) {
-    if (phase == kCGSGesturePhaseBegan || velocity <= 0.0 || velocity >= instantGestureVelocity) {
+    if (phase == kCGSGesturePhaseBegan
+        || velocity <= nonInstantGestureVelocityFloor
+        || velocity >= instantGestureVelocity) {
         return (double)FLT_TRUE_MIN;
     }
 
