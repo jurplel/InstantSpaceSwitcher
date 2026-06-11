@@ -15,6 +15,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("CoreFoundation"),
+                .linkedFramework("CoreVideo"),
                 .linkedFramework("IOKit")
             ]
         ),
