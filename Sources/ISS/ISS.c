@@ -324,17 +324,19 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
     if (useCursorDisplay) {
         // Get display where cursor is located
         CGEventRef tempEvent = CGEventCreate(NULL);
-        CGPoint cursorLocation = CGEventGetLocation(tempEvent);
-        CFRelease(tempEvent);
-        
-        CGDirectDisplayID cursorDisplay = 0;
-        uint32_t cursorDisplayCount = 0;
-        
-        if (CGGetDisplaysWithPoint(cursorLocation, 1, &cursorDisplay, &cursorDisplayCount) == kCGErrorSuccess && cursorDisplayCount > 0) {
-            CFUUIDRef displayUUID = CGDisplayCreateUUIDFromDisplayID(cursorDisplay);
-            if (displayUUID) {
-                activeDisplayIdentifier = CFUUIDCreateString(NULL, displayUUID);
-                CFRelease(displayUUID);
+        if (tempEvent) {
+            CGPoint cursorLocation = CGEventGetLocation(tempEvent);
+            CFRelease(tempEvent);
+
+            CGDirectDisplayID cursorDisplay = 0;
+            uint32_t cursorDisplayCount = 0;
+
+            if (CGGetDisplaysWithPoint(cursorLocation, 1, &cursorDisplay, &cursorDisplayCount) == kCGErrorSuccess && cursorDisplayCount > 0) {
+                CFUUIDRef displayUUID = CGDisplayCreateUUIDFromDisplayID(cursorDisplay);
+                if (displayUUID) {
+                    activeDisplayIdentifier = CFUUIDCreateString(NULL, displayUUID);
+                    CFRelease(displayUUID);
+                }
             }
         }
     } else {
@@ -555,6 +557,11 @@ bool iss_init(void) {
     }
 
     globalSource = CFMachPortCreateRunLoopSource(NULL, globalTap, 0);
+    if (!globalSource) {
+        CFRelease(globalTap);
+        globalTap = NULL;
+        return false;
+    }
     CFRunLoopAddSource(CFRunLoopGetMain(), globalSource, kCFRunLoopCommonModes);
     CGEventTapEnable(globalTap, true);
 
