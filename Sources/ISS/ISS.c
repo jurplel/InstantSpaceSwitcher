@@ -1,4 +1,5 @@
 #include "include/ISS.h"
+#include "event_serialize.h"
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -6,6 +7,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <float.h>
+#include <mach/mach_time.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,11 +15,17 @@
 
 static const CGEventField kCGSEventTypeField = (CGEventField)55;
 static const CGEventField kCGEventGestureHIDType = (CGEventField)110;
+static const CGEventField kCGEventGestureSwipeMask = (CGEventField)115;
 static const CGEventField kCGEventGestureSwipeMotion = (CGEventField)123;
 static const CGEventField kCGEventGestureSwipeProgress = (CGEventField)124;
+static const CGEventField kCGEventGestureSwipePositionX = (CGEventField)125;
+static const CGEventField kCGEventGestureSwipePositionY = (CGEventField)126;
 static const CGEventField kCGEventGestureSwipeVelocityX = (CGEventField)129;
 static const CGEventField kCGEventGestureSwipeVelocityY = (CGEventField)130;
 static const CGEventField kCGEventGesturePhase = (CGEventField)132;
+static const CGEventField kCGEventGesturePhaseAlias = (CGEventField)134;
+static const CGEventField kCGEventGestureZoomDeltaY = (CGEventField)138;
+static const CGEventField kCGEventSourceUnixProcessIDAlias = (CGEventField)169;
 
 // See IOHIDEventType enum in IOHIDFamily
 static const uint32_t kIOHIDEventTypeDockSwipe = 23;
@@ -98,7 +106,6 @@ static void set_prediction(const char *displayID, unsigned int index) {
 
 static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             CGSSpaceID activeSpace,
-                                            bool hasActiveSpace,
                                             ISSSpaceInfo *outInfo);
 static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDisplay);
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
@@ -110,6 +117,7 @@ static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direc
 static void swipe_override_switch(ISSDirection dir) {
     ISSSpaceInfo info;
     if (!iss_get_space_info(&info)) {
+        fprintf(stderr, "ISS: swipe_override dir=%d (no space info, gesture only)\n", dir);
         iss_perform_switch_gesture(dir, gestureSpeed);
         return;
     }
@@ -222,9 +230,24 @@ static bool cgs_symbols_available(void) {
            (&CGSCopyManagedDisplaySpaces != NULL);
 }
 
+// On macOS 27, CGSGetActiveSpace can return 0. SLSManagedDisplayGetCurrentSpace
+// is a per-display fallback. Load it dynamically so the binary links on systems
+// where the symbol is absent.
+static CGSSpaceID sls_managed_display_get_current_space(CGSConnectionID connection, CFStringRef display) {
+    static CGSSpaceID (*fn)(CGSConnectionID, CFStringRef) = NULL;
+    static bool loaded = false;
+    if (!loaded) {
+        fn = (CGSSpaceID (*)(CGSConnectionID, CFStringRef))dlsym(RTLD_DEFAULT, "SLSManagedDisplayGetCurrentSpace");
+        loaded = true;
+    }
+    if (!fn) {
+        return 0;
+    }
+    return fn(connection, display);
+}
+
 static bool extract_space_info_from_display(CFDictionaryRef displayDict,
                                             CGSSpaceID activeSpace,
-                                            bool hasActiveSpace,
                                             ISSSpaceInfo *outInfo) {
     if (!displayDict || !outInfo) {
         return false;
@@ -236,25 +259,24 @@ static bool extract_space_info_from_display(CFDictionaryRef displayDict,
         CFStringGetCString(identifier, outInfo->displayID, sizeof(outInfo->displayID), kCFStringEncodingUTF8);
     }
 
+    const void *currentSpaceValue = CFDictionaryGetValue(displayDict, CFSTR("Current Space"));
+    if (currentSpaceValue && CFGetTypeID(currentSpaceValue) == CFDictionaryGetTypeID()) {
+        CFDictionaryRef currentSpaceDict = (CFDictionaryRef)currentSpaceValue;
+        CFNumberRef currentManagedID = (CFNumberRef)CFDictionaryGetValue(currentSpaceDict, CFSTR("ManagedSpaceID"));
+        CFNumberRef currentID64 = (CFNumberRef)CFDictionaryGetValue(currentSpaceDict, CFSTR("id64"));
+        CGSSpaceID cs_managed = 0, cs_id64 = 0;
+        if (currentManagedID && CFGetTypeID(currentManagedID) == CFNumberGetTypeID()) {
+            CFNumberGetValue(currentManagedID, kCFNumberSInt64Type, &cs_managed);
+        }
+        if (currentID64 && CFGetTypeID(currentID64) == CFNumberGetTypeID()) {
+            CFNumberGetValue(currentID64, kCFNumberSInt64Type, &cs_id64);
+        }
+    }
+
     const void *spacesValue = CFDictionaryGetValue(displayDict, CFSTR("Spaces"));
     if (!spacesValue || CFGetTypeID(spacesValue) != CFArrayGetTypeID()) {
         return false;
     }
-
-    // Try to get current space from display dict (more accurate per-display)
-    CGSSpaceID displayActiveSpace = 0;
-    const void *currentSpaceValue = CFDictionaryGetValue(displayDict, CFSTR("Current Space"));
-    if (currentSpaceValue && CFGetTypeID(currentSpaceValue) == CFDictionaryGetTypeID()) {
-        CFDictionaryRef currentSpaceDict = (CFDictionaryRef)currentSpaceValue;
-        CFNumberRef currentSpaceID = (CFNumberRef)CFDictionaryGetValue(currentSpaceDict, CFSTR("id64"));
-        if (currentSpaceID && CFGetTypeID(currentSpaceID) == CFNumberGetTypeID()) {
-            CFNumberGetValue(currentSpaceID, kCFNumberSInt64Type, &displayActiveSpace);
-        }
-    }
-    
-    // Use display-specific active space if available, otherwise use global
-    CGSSpaceID targetActiveSpace = displayActiveSpace != 0 ? displayActiveSpace : activeSpace;
-    bool hasTargetActiveSpace = displayActiveSpace != 0 || hasActiveSpace;
 
     CFArrayRef spaces = (CFArrayRef)spacesValue;
     const CFIndex spaceCount = CFArrayGetCount(spaces);
@@ -270,14 +292,21 @@ static bool extract_space_info_from_display(CFDictionaryRef displayDict,
         }
 
         CFDictionaryRef spaceDict = (CFDictionaryRef)spaceValue;
-        CFNumberRef idNumber = (CFNumberRef)CFDictionaryGetValue(spaceDict, CFSTR("id64"));
-        if (!idNumber || CFGetTypeID(idNumber) != CFNumberGetTypeID()) {
-            continue;
+        // macOS 27 uses ManagedSpaceID as the canonical space identifier;
+        // on older macOS the active-space APIs return id64. Prefer
+        // ManagedSpaceID and fall back to id64 when absent.
+        CFNumberRef idNumber = (CFNumberRef)CFDictionaryGetValue(spaceDict, CFSTR("ManagedSpaceID"));
+        CFNumberRef id64Number = (CFNumberRef)CFDictionaryGetValue(spaceDict, CFSTR("id64"));
+        CGSSpaceID candidate = 0;
+        if (idNumber && CFGetTypeID(idNumber) == CFNumberGetTypeID()) {
+            CFNumberGetValue(idNumber, kCFNumberSInt64Type, &candidate);
+        }
+        if (candidate == 0 && id64Number && CFGetTypeID(id64Number) == CFNumberGetTypeID()) {
+            CFNumberGetValue(id64Number, kCFNumberSInt64Type, &candidate);
         }
 
-        CGSSpaceID candidate = 0;
-        if (CFNumberGetValue(idNumber, kCFNumberSInt64Type, &candidate)) {
-            if (!foundActive && hasTargetActiveSpace && candidate == targetActiveSpace) {
+        if (candidate != 0) {
+            if (!foundActive && activeSpace != 0 && candidate == activeSpace) {
                 activeIndex = totalSpaces;
                 foundActive = true;
             }
@@ -285,7 +314,9 @@ static bool extract_space_info_from_display(CFDictionaryRef displayDict,
         }
     }
 
-    if (totalSpaces == 0 || (hasTargetActiveSpace && !foundActive)) {
+    if (totalSpaces == 0 || (activeSpace != 0 && !foundActive)) {
+        fprintf(stderr, "ISS: extract_space_info failed: total=%u activeSpace=%llu foundActive=%d\n",
+                totalSpaces, (unsigned long long)activeSpace, foundActive);
         return false;
     }
 
@@ -306,21 +337,9 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
         return false;
     }
 
-    CGSSpaceID activeSpace = 0;
-    bool hasActiveSpace = false;
-    if (&CGSGetActiveSpace != NULL) {
-        activeSpace = CGSGetActiveSpace(connection);
-        if (activeSpace != 0) {
-            hasActiveSpace = true;
-        } else {
-            fprintf(stderr, "ISS: CGSGetActiveSpace returned 0\n");
-            return false;
-        }
-    }
-
-    // Get display identifier based on mode
+    // Get display identifier based on mode first; macOS 27 may need it to
+    // determine the active space.
     CFStringRef activeDisplayIdentifier = NULL;
-    
     if (useCursorDisplay) {
         // Get display where cursor is located
         CGEventRef tempEvent = CGEventCreate(NULL);
@@ -342,6 +361,25 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
         if (&CGSCopyActiveMenuBarDisplayIdentifier != NULL) {
             activeDisplayIdentifier = CGSCopyActiveMenuBarDisplayIdentifier(connection);
         }
+    }
+
+    // On macOS 27 the per-display API returns the active space ID that
+    // matches ManagedSpaceID in the Spaces array. CGSGetActiveSpace is kept
+    // as a fallback for older versions where it still returns a usable ID.
+    CGSSpaceID activeSpace = 0;
+    if (activeDisplayIdentifier != NULL) {
+        activeSpace = sls_managed_display_get_current_space(connection, activeDisplayIdentifier);
+    }
+    if (activeSpace == 0 && &CGSGetActiveSpace != NULL) {
+        activeSpace = CGSGetActiveSpace(connection);
+    }
+
+    if (activeSpace == 0) {
+        if (activeDisplayIdentifier) {
+            CFRelease(activeDisplayIdentifier);
+        }
+        fprintf(stderr, "ISS: unable to determine active space\n");
+        return false;
     }
 
     CFArrayRef displays = CGSCopyManagedDisplaySpaces(connection, activeDisplayIdentifier);
@@ -387,7 +425,7 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
 
     bool success = false;
     if (targetDisplay) {
-        success = extract_space_info_from_display(targetDisplay, activeSpace, hasActiveSpace, info);
+        success = extract_space_info_from_display(targetDisplay, activeSpace, info);
     }
 
     if (activeDisplayIdentifier) {
@@ -422,11 +460,20 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
 
 static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
     const bool isRight = (direction == ISSDirectionRight);
-    // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant.
-    const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
+    // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant on
+    // legacy macOS versions. On macOS 27 the Dock server validates the public
+    // progress value as well as the raw IOHID payload, so we use the smallest
+    // non-zero value that survives 16.16 fixed-point quantization.
+    // On macOS 27 the Dock server's interpretation of positive/negative
+    // progress and velocity is inverted relative to the app's internal
+    // direction model. Flip the sign for the augmented path only.
+    const double progress = iss_requires_event_augmentation()
+                                ? (isRight ? -0.000016 : 0.000016)
+                                : (isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN);
 
     // Velocity of gesture based on speed setting
     const double vel = isRight ? velocity : -velocity;
+    const double modernVel = isRight ? -velocity : velocity;
 
     CGEventRef ev = CGEventCreate(NULL);
     if (!ev) {
@@ -437,6 +484,35 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress, progress);
     CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
+
+    // macOS 27 no longer recognizes synthetic dock-swipe events unless they
+    // include the raw IOHID payload inside field 4205. Build the extra fields
+    // the payload generator expects, augment the event, and post that instead.
+    if (iss_requires_event_augmentation()) {
+        CGEventSetIntegerValueField(ev, kCGEventGesturePhaseAlias, phase);
+        CGEventSetDoubleValueField(ev, kCGEventGestureZoomDeltaY, 3.0);
+        CGEventSetDoubleValueField(ev, kCGEventSourceUnixProcessIDAlias,
+                                    (double)mach_absolute_time());
+        CGEventSetDoubleValueField(ev, kCGEventGestureSwipePositionX, 0.1);
+
+        // Match FasterSwiper: only the Ended event carries velocity.
+        // Velocity on Began/Changed can cause the switch to bounce.
+        // The macOS 27 Dock server interprets the sign opposite to the app's
+        // direction model, so use the inverted velocity here.
+        if (phase == kCGSGesturePhaseEnded) {
+            CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, modernVel);
+        }
+
+        CGEventRef augmented = iss_augment_dock_swipe_event(ev);
+        CFRelease(ev);
+        if (!augmented) {
+            return false;
+        }
+        CGEventPost(kCGSessionEventTap, augmented);
+        CFRelease(augmented);
+        return true;
+    }
+
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
     CGEventPost(kCGSessionEventTap, ev);
@@ -622,12 +698,14 @@ bool iss_switch(ISSDirection direction) {
         return true;
     }
 
-    return iss_perform_switch_gesture(direction, gestureSpeed);
+    fprintf(stderr, "ISS: switch dir=%d blocked (no space info)\n", direction);
+    return false;
 }
 
 bool iss_switch_to_index(unsigned int targetIndex) {
     ISSSpaceInfo info;
     if (!iss_get_space_info(&info)) {
+        fprintf(stderr, "ISS: switch_to_index %u failed (no space info)\n", targetIndex);
         return false;
     }
 
