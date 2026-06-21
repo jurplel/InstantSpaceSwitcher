@@ -217,6 +217,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     button.image = finalIcon
   }
 
+  func setIconVisible(_ visible: Bool) {
+    statusItem.isVisible = visible
+  }
+
   func applyHotkey(_ combination: HotkeyCombination, to identifier: HotkeyIdentifier) {
     let menuItem: NSMenuItem?
     switch identifier {

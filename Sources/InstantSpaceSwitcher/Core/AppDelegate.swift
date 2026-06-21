@@ -57,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     setupMainMenu()
     menuBarController.delegate = self
     menuBarController.setup()
+
+    if UserDefaults.standard.bool(forKey: "hideMenuBarIcon") {
+      menuBarController.setIconVisible(false)
+    }
+
     bindHotkeys()
     observeSpaceChanges()
     observeAppActivation()
@@ -226,6 +231,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
           for: identifier, combination: self.hotkeyStore.combination(for: identifier))
       }
     }.store(in: &cancellables)
+  }
+
+  func setMenuBarIconVisible(_ visible: Bool) {
+    menuBarController.setIconVisible(visible)
   }
 
   func reregisterAllHotkeys() {
