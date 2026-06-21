@@ -13,9 +13,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
+    <string>3.0</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>3</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © 2026 jurplel</string>
     <key>LSMinimumSystemVersion</key>
