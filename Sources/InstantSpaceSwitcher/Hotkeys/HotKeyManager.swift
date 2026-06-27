@@ -4,17 +4,19 @@ import Carbon
 class HotKeyManager {
   static let shared = HotKeyManager()
 
-  private struct Registration {
-    let id: UInt32
-    var reference: EventHotKeyRef?
+  private struct Entry {
+    let identifier: HotkeyIdentifier
+    let combination: HotkeyCombination
+    let handler: () -> Void
   }
 
-  private var handlers: [UInt32: () -> Void] = [:]
-  private var registrations: [HotkeyIdentifier: Registration] = [:]
-  private var currentId: UInt32 = 1
+  private var entries: [HotkeyIdentifier: Entry] = [:]
+  private var eventTap: CFMachPort?
+  private var runLoopSource: CFRunLoopSource?
+  private var retryScheduled = false
 
   private init() {
-    installEventHandler()
+    installEventTap()
   }
 
   func register(
@@ -22,59 +24,118 @@ class HotKeyManager {
   ) {
     unregister(identifier: identifier)
 
-    let id = currentId
-    currentId &+= 1
-
-    var hotKeyRef: EventHotKeyRef?
-    let hotKeyID = EventHotKeyID(signature: 0x1111, id: id)
-    let status = RegisterEventHotKey(
-      combination.keyCode, combination.modifiers, hotKeyID, GetEventDispatcherTarget(), 0,
-      &hotKeyRef)
-
-    guard status == noErr else {
-      print("Failed to register hotkey for \(identifier) status=\(status)")
-      return
-    }
-
-    handlers[id] = handler
-    registrations[identifier] = Registration(id: id, reference: hotKeyRef)
+    entries[identifier] = Entry(identifier: identifier, combination: combination, handler: handler)
+    installEventTap()
   }
 
   func unregister(identifier: HotkeyIdentifier) {
-    guard let registration = registrations.removeValue(forKey: identifier) else { return }
-    handlers.removeValue(forKey: registration.id)
-    if let reference = registration.reference {
-      UnregisterEventHotKey(reference)
-    }
+    entries.removeValue(forKey: identifier)
   }
 
   func unregisterAll() {
-    for (_, registration) in registrations {
-      if let reference = registration.reference {
-        UnregisterEventHotKey(reference)
-      }
-    }
-    registrations.removeAll()
-    handlers.removeAll()
+    entries.removeAll()
   }
 
-  private func installEventHandler() {
-    var eventSpec = EventTypeSpec(
-      eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+  private func installEventTap() {
+    if let eventTap {
+      if CFMachPortIsValid(eventTap) {
+        return
+      }
+      self.eventTap = nil
+      runLoopSource = nil
+    }
 
-    InstallEventHandler(
-      GetEventDispatcherTarget(),
-      { (_, event, _) -> OSStatus in
-        var hotKeyID = EventHotKeyID()
-        GetEventParameter(
-          event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil,
-          MemoryLayout<EventHotKeyID>.size, nil, &hotKeyID)
+    let eventMask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+    guard
+      let eventTap = CGEvent.tapCreate(
+        tap: .cgSessionEventTap,
+        place: .headInsertEventTap,
+        options: .defaultTap,
+        eventsOfInterest: eventMask,
+        callback: { _, type, event, userInfo in
+          guard let userInfo else { return Unmanaged.passUnretained(event) }
+          let manager = Unmanaged<HotKeyManager>.fromOpaque(userInfo).takeUnretainedValue()
 
-        if let handler = HotKeyManager.shared.handlers[hotKeyID.id] {
-          handler()
-        }
+          if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let eventTap = manager.eventTap {
+              CGEvent.tapEnable(tap: eventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+          }
 
-        return noErr
-      }, 1, &eventSpec, nil, nil)
+          guard type == .keyDown else {
+            return Unmanaged.passUnretained(event)
+          }
+
+          if manager.dispatch(event: event) {
+            return nil
+          }
+          return Unmanaged.passUnretained(event)
+        },
+        userInfo: Unmanaged.passUnretained(self).toOpaque()
+      )
+    else {
+      print("Failed to install hotkey event tap")
+      scheduleEventTapRetry()
+      return
+    }
+
+    retryScheduled = false
+    self.eventTap = eventTap
+    runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
+    if let runLoopSource {
+      CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+    }
+    CGEvent.tapEnable(tap: eventTap, enable: true)
+  }
+
+  private func scheduleEventTapRetry() {
+    guard !retryScheduled else { return }
+    retryScheduled = true
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+      guard let self else { return }
+      self.retryScheduled = false
+      self.installEventTap()
+    }
+  }
+
+  private func dispatch(event: CGEvent) -> Bool {
+    let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+    let rawFlags = event.flags.rawValue
+    let selectedEntry = Self.preferredEntry(from: Array(entries.values), keyCode: keyCode, flags: rawFlags)
+
+    if let selectedEntry {
+      DispatchQueue.main.async {
+        selectedEntry.handler()
+      }
+      return true
+    }
+
+    return false
+  }
+
+  static func preferredCombination(
+    from combinations: [HotkeyCombination], keyCode: UInt32, eventModifierFlags flags: UInt64
+  ) -> HotkeyCombination? {
+    combinations.filter {
+      $0.keyCode == keyCode && $0.matches(eventModifierFlags: flags)
+    }.max {
+      priority(for: $0) < priority(for: $1)
+    }
+  }
+
+  private static func preferredEntry(
+    from entries: [Entry], keyCode: UInt32, flags: UInt64
+  ) -> Entry? {
+    entries.filter {
+      $0.combination.keyCode == keyCode && $0.combination.matches(eventModifierFlags: flags)
+    }.max {
+      priority(for: $0.combination) < priority(for: $1.combination)
+    }
+  }
+
+  private static func priority(for combination: HotkeyCombination) -> Int {
+    combination.optionKeyKind == .right ? 1 : 0
   }
 }

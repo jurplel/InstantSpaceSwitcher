@@ -2,14 +2,31 @@ import AppKit
 import Carbon
 import Foundation
 
+enum OptionKeyKind: String, Codable {
+  case any
+  case right
+}
+
 struct HotkeyCombination: Codable, Equatable {
   var keyCode: UInt32
   var modifiers: UInt32
   var displayKey: String
   var keyEquivalent: String
+  var optionKeyKind: OptionKeyKind
+
+  init(
+    keyCode: UInt32, modifiers: UInt32, displayKey: String, keyEquivalent: String,
+    optionKeyKind: OptionKeyKind = .any
+  ) {
+    self.keyCode = keyCode
+    self.modifiers = modifiers
+    self.displayKey = displayKey
+    self.keyEquivalent = keyEquivalent
+    self.optionKeyKind = optionKeyKind
+  }
 
   var displayString: String {
-    let modifierSymbols = HotkeyCombination.symbols(for: modifiers)
+    let modifierSymbols = HotkeyCombination.symbols(for: modifiers, optionKeyKind: optionKeyKind)
     return modifierSymbols + displayKey
   }
 
@@ -24,6 +41,43 @@ struct HotkeyCombination: Codable, Equatable {
 
   var isValid: Bool {
     !displayKey.isEmpty
+  }
+
+  var registrationModifiers: UInt32 {
+    modifiers
+  }
+
+  func matches(eventModifierFlags flags: UInt64) -> Bool {
+    guard modifiers == HotkeyModifierState.carbonMask(fromRawFlags: flags) else {
+      return false
+    }
+
+    if optionKeyKind == .right {
+      return HotkeyModifierState.isRightOptionPressed(rawFlags: flags)
+    }
+
+    if modifiers & UInt32(optionKey) != 0 {
+      return !HotkeyModifierState.isRightOptionPressed(rawFlags: flags)
+    }
+
+    return true
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case keyCode
+    case modifiers
+    case displayKey
+    case keyEquivalent
+    case optionKeyKind
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    keyCode = try container.decode(UInt32.self, forKey: .keyCode)
+    modifiers = try container.decode(UInt32.self, forKey: .modifiers)
+    displayKey = try container.decode(String.self, forKey: .displayKey)
+    keyEquivalent = try container.decode(String.self, forKey: .keyEquivalent)
+    optionKeyKind = try container.decodeIfPresent(OptionKeyKind.self, forKey: .optionKeyKind) ?? .any
   }
 
   static let defaultLeft = HotkeyCombination(
@@ -107,6 +161,8 @@ struct HotkeyCombination: Codable, Equatable {
   static func from(event: NSEvent) -> HotkeyCombination? {
     let modifiers = event.modifierFlags.carbonMask
     let keyCode = UInt32(event.keyCode)
+    let optionKeyKind = HotkeyModifierState.optionKeyKind(
+      fromRawFlags: UInt64(event.modifierFlags.rawValue))
     
     // Handle arrow keys
     if let special = event.specialKey, let symbol = arrowSymbol(for: special) {
@@ -114,7 +170,8 @@ struct HotkeyCombination: Codable, Equatable {
         keyCode: keyCode,
         modifiers: modifiers,
         displayKey: symbol,
-        keyEquivalent: arrowKeyEquivalent(special)
+        keyEquivalent: arrowKeyEquivalent(special),
+        optionKeyKind: optionKeyKind
       )
     }
     
@@ -124,7 +181,8 @@ struct HotkeyCombination: Codable, Equatable {
         keyCode: keyCode,
         modifiers: modifiers,
         displayKey: displayKey,
-        keyEquivalent: keyEquiv
+        keyEquivalent: keyEquiv,
+        optionKeyKind: optionKeyKind
       )
     }
 
@@ -138,7 +196,8 @@ struct HotkeyCombination: Codable, Equatable {
       keyCode: keyCode,
       modifiers: modifiers,
       displayKey: upper,
-      keyEquivalent: String(first).lowercased()
+      keyEquivalent: String(first).lowercased(),
+      optionKeyKind: optionKeyKind
     )
   }
 
@@ -224,10 +283,12 @@ struct HotkeyCombination: Codable, Equatable {
     }
   }
 
-  private static func symbols(for modifiers: UInt32) -> String {
+  private static func symbols(for modifiers: UInt32, optionKeyKind: OptionKeyKind) -> String {
     var result = ""
     if modifiers & UInt32(controlKey) != 0 { result += "⌃" }
-    if modifiers & UInt32(optionKey) != 0 { result += "⌥" }
+    if modifiers & UInt32(optionKey) != 0 {
+      result += optionKeyKind == .right ? "AltGr" : "⌥"
+    }
     if modifiers & UInt32(shiftKey) != 0 { result += "⇧" }
     if modifiers & UInt32(cmdKey) != 0 { result += "⌘" }
     return result
@@ -235,6 +296,22 @@ struct HotkeyCombination: Codable, Equatable {
 
   private static var defaultModifierMask: UInt32 {
     UInt32(cmdKey) | UInt32(optionKey) | UInt32(controlKey)
+  }
+}
+
+enum HotkeyModifierState {
+  private static let deviceRightOptionMask: UInt64 = 0x00000040
+
+  static func optionKeyKind(fromRawFlags flags: UInt64) -> OptionKeyKind {
+    isRightOptionPressed(rawFlags: flags) ? .right : .any
+  }
+
+  static func isRightOptionPressed(rawFlags flags: UInt64) -> Bool {
+    flags & deviceRightOptionMask != 0
+  }
+
+  static func carbonMask(fromRawFlags flags: UInt64) -> UInt32 {
+    NSEvent.ModifierFlags(rawValue: UInt(flags)).carbonMask
   }
 }
 
