@@ -240,8 +240,9 @@ final class HotkeyPreferencesView: NSView {
   private func handleRecordingResult(
     _ combination: HotkeyCombination, for identifier: HotkeyIdentifier
   ) {
-    let otherIdentifier = identifier.other
-    if store.combination(for: otherIdentifier) == combination {
+    if let otherIdentifier = HotkeyIdentifier.allCases.first(where: {
+      $0 != identifier && store.combination(for: $0) == combination
+    }) {
       NSSound.beep()
       setStatus("Shortcut already used for \(otherIdentifier.displayName).", color: .systemRed)
       recordingIdentifier = nil
@@ -297,15 +298,5 @@ final class HotkeyPreferencesView: NSView {
   private func setStatus(_ message: String, color: NSColor) {
     statusLabel.stringValue = message
     statusLabel.textColor = color
-  }
-}
-
-extension HotkeyIdentifier {
-  fileprivate var other: HotkeyIdentifier {
-    switch self {
-    case .left: return .right
-    case .right: return .left
-    default: return .left
-    }
   }
 }
