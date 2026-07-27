@@ -90,9 +90,6 @@ cp "${BUILD_PATH}/ISSCli" "${APP_BUNDLE}/Contents/MacOS/"
 cp Info.plist "${APP_BUNDLE}/Contents/"
 
 GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-if [[ -n "$(git status --porcelain --untracked-files=normal 2>/dev/null)" ]]; then
-  GIT_SHA="${GIT_SHA}-local"
-fi
 echo "Injecting git SHA: ${GIT_SHA}"
 /usr/libexec/PlistBuddy -c "Add :GitCommitHash string ${GIT_SHA}" "${APP_BUNDLE}/Contents/Info.plist" 2>/dev/null || \
 /usr/libexec/PlistBuddy -c "Set :GitCommitHash ${GIT_SHA}" "${APP_BUNDLE}/Contents/Info.plist"
