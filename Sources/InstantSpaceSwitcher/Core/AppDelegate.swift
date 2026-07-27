@@ -2,6 +2,8 @@ import AppKit
 import ApplicationServices
 import Combine
 import ISS
+import OSLog
+import SpaceTransition
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -13,6 +15,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellables = Set<AnyCancellable>()
   private var spaceChangeObserver: Any?
   private var appActivationObserver: Any?
+  private var transitionCoordinator = SpaceTransitionCoordinator()
+  private var transitionTimeoutWorkItem: DispatchWorkItem?
+  private var recoveryWorkItem: DispatchWorkItem?
+  private let transitionLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.interversehq.InstantSpaceSwitcher",
+    category: "space-transition"
+  )
+  private let transitionTimeout: TimeInterval = 1.0
+  private let recoveryInterval: TimeInterval = 1.0
 
   func applicationWillFinishLaunching(_ notification: Notification) {
     NSAppleEventManager.shared().setEventHandler(
@@ -35,6 +46,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       retryIssInit()
     }
 
+    iss_set_swipe_callback { direction in
+      DispatchQueue.main.async {
+        (NSApp.delegate as? AppDelegate)?.performSpaceSwitch(direction)
+      }
+    }
+
     if UserDefaults.standard.bool(forKey: "swipeOverride") {
       iss_set_swipe_override(true)
     }
@@ -46,12 +63,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     if UserDefaults.standard.object(forKey: "overlayDetectionEnabled") as? Bool ?? true {
       iss_set_overlay_detection_enabled(true)
-    }
-
-    iss_set_switch_callback { newSpaceIndex in
-      DispatchQueue.main.async {
-        OSDWindow.shared.show(message: "\(newSpaceIndex + 1)")
-      }
     }
 
     setupMainMenu()
@@ -69,6 +80,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    transitionTimeoutWorkItem?.cancel()
+    recoveryWorkItem?.cancel()
+    iss_set_swipe_callback(nil)
     iss_destroy()
     stopObservingSpaceChanges()
     stopObservingAppActivation()
@@ -287,19 +301,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func performSpaceSwitch(_ direction: ISSDirection) {
-    if !iss_switch(direction) {
-      NSSound.beep()
-      return
-    }
-    refreshSpaceInfo()
+    let coordinatorDirection: SpaceTransitionCoordinator.Direction =
+      direction == ISSDirectionLeft ? .left : .right
+    let transitionActive = transitionCoordinator.isTransitionInFlight
+      || transitionCoordinator.isRecovering
+    let snapshot = transitionActive ? nil : loadSpaceSnapshot()
+    handleTransitionEffects(
+      transitionCoordinator.request(coordinatorDirection, snapshot: snapshot)
+    )
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
-    if !iss_switch_to_index(index) {
+    guard !transitionCoordinator.isTransitionInFlight,
+      !transitionCoordinator.isRecovering
+    else {
+      transitionLogger.notice(
+        "event=request_rejected reason=transition_active target=\(index, privacy: .public)"
+      )
       NSSound.beep()
       return
     }
-    refreshSpaceInfo()
+
+    guard let snapshot = loadSpaceSnapshot(), Int(index) < snapshot.spaceCount else {
+      transitionLogger.error("event=request_failed reason=target_unavailable target=\(index, privacy: .public)")
+      NSSound.beep()
+      return
+    }
+
+    let targetIndex = Int(index)
+    let projectedIndex = transitionCoordinator.projectedIndex(from: snapshot)
+    guard targetIndex != projectedIndex else { return }
+
+    let direction: SpaceTransitionCoordinator.Direction =
+      targetIndex < projectedIndex ? .left : .right
+    for _ in 0..<abs(targetIndex - projectedIndex) {
+      handleTransitionEffects(transitionCoordinator.request(direction, snapshot: snapshot))
+    }
   }
 
   private func performSpaceLastSpace() {
@@ -309,6 +346,152 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     performSpaceSwitchToIndex(lastSpaceIndex)
+  }
+
+  private func loadSpaceSnapshot() -> SpaceTransitionCoordinator.SpaceSnapshot? {
+    var info = ISSSpaceInfo()
+    guard iss_get_space_info(&info) else { return nil }
+
+    let displayID = withUnsafeBytes(of: &info.displayID) { bytes -> String in
+      guard let baseAddress = bytes.baseAddress else { return "" }
+      return String(cString: baseAddress.assumingMemoryBound(to: CChar.self))
+    }
+    guard !displayID.isEmpty else { return nil }
+
+    return SpaceTransitionCoordinator.SpaceSnapshot(
+      displayID: displayID,
+      currentIndex: Int(info.currentIndex),
+      spaceCount: Int(info.spaceCount)
+    )
+  }
+
+  private func handleTransitionEffects(
+    _ effects: [SpaceTransitionCoordinator.Effect]
+  ) {
+    for effect in effects {
+      switch effect {
+      case .requested(let direction, let queueDepth):
+        transitionLogger.info(
+          "event=request direction=\(direction.rawValue, privacy: .public) queue_depth=\(queueDepth, privacy: .public)"
+        )
+
+      case .start(let transition, let queueDepth):
+        startTransition(transition, queueDepth: queueDepth)
+
+      case .confirmed(let transition, let queueDepth):
+        transitionTimeoutWorkItem?.cancel()
+        transitionTimeoutWorkItem = nil
+        iss_reset_predictions()
+        refreshSpaceInfo()
+        if !transitionCoordinator.isTransitionInFlight {
+          OSDWindow.shared.show(message: "\(transition.targetIndex + 1)")
+        }
+        transitionLogger.info(
+          "event=confirmation id=\(transition.id, privacy: .public) direction=\(transition.direction.rawValue, privacy: .public) target=\(transition.targetIndex, privacy: .public) queue_depth=\(queueDepth, privacy: .public)"
+        )
+
+      case .blocked(let direction, let queueDepth):
+        transitionLogger.info(
+          "event=request_blocked direction=\(direction.rawValue, privacy: .public) queue_depth=\(queueDepth, privacy: .public)"
+        )
+        NSSound.beep()
+
+      case .ignoredConfirmation(let transitionID):
+        transitionLogger.debug(
+          "event=notification_ignored id=\(transitionID ?? 0, privacy: .public)"
+        )
+
+      case .timedOut(let transition, let droppedQueueDepth):
+        transitionTimeoutWorkItem?.cancel()
+        transitionTimeoutWorkItem = nil
+        transitionLogger.error(
+          "event=timeout id=\(transition.id, privacy: .public) direction=\(transition.direction.rawValue, privacy: .public) source=\(transition.sourceIndex, privacy: .public) target=\(transition.targetIndex, privacy: .public) dropped_queue_depth=\(droppedQueueDepth, privacy: .public)"
+        )
+        beginRecovery(for: transition.id)
+
+      case .injectionFailed(let transition, let droppedQueueDepth):
+        transitionTimeoutWorkItem?.cancel()
+        transitionTimeoutWorkItem = nil
+        transitionLogger.error(
+          "event=injection_failed id=\(transition.id, privacy: .public) direction=\(transition.direction.rawValue, privacy: .public) dropped_queue_depth=\(droppedQueueDepth, privacy: .public)"
+        )
+        beginRecovery(for: transition.id)
+        NSSound.beep()
+
+      case .spaceInfoUnavailable(let direction):
+        transitionLogger.error(
+          "event=request_failed reason=space_info_unavailable direction=\(direction.rawValue, privacy: .public)"
+        )
+        NSSound.beep()
+
+      case .rejectedDuringRecovery(let direction):
+        transitionLogger.notice(
+          "event=request_rejected reason=recovery direction=\(direction.rawValue, privacy: .public)"
+        )
+        NSSound.beep()
+
+      case .reconciled(let transitionID):
+        recoveryWorkItem?.cancel()
+        recoveryWorkItem = nil
+        iss_reset_predictions()
+        refreshSpaceInfo()
+        transitionLogger.notice(
+          "event=reconciliation id=\(transitionID, privacy: .public) status=ready"
+        )
+      }
+    }
+  }
+
+  private func startTransition(
+    _ transition: SpaceTransitionCoordinator.Transition,
+    queueDepth: Int
+  ) {
+    OSDWindow.shared.hideForSpaceTransition()
+    scheduleTimeout(for: transition.id)
+    transitionLogger.info(
+      "event=start id=\(transition.id, privacy: .public) direction=\(transition.direction.rawValue, privacy: .public) source=\(transition.sourceIndex, privacy: .public) target=\(transition.targetIndex, privacy: .public) queue_depth=\(queueDepth, privacy: .public)"
+    )
+
+    let direction = transition.direction == .left ? ISSDirectionLeft : ISSDirectionRight
+    guard iss_switch(direction) else {
+      handleTransitionEffects(
+        transitionCoordinator.injectionFailed(transitionID: transition.id)
+      )
+      return
+    }
+  }
+
+  private func scheduleTimeout(for transitionID: UInt64) {
+    transitionTimeoutWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      self.handleTransitionEffects(
+        self.transitionCoordinator.timeout(transitionID: transitionID)
+      )
+    }
+    transitionTimeoutWorkItem = workItem
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + transitionTimeout,
+      execute: workItem
+    )
+  }
+
+  private func beginRecovery(for transitionID: UInt64) {
+    recoveryWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      guard let self else { return }
+      self.handleTransitionEffects(
+        self.transitionCoordinator.finishRecovery(transitionID: transitionID)
+      )
+    }
+    recoveryWorkItem = workItem
+    DispatchQueue.main.asyncAfter(
+      deadline: .now() + recoveryInterval,
+      execute: workItem
+    )
+    transitionLogger.notice(
+      "event=reconciliation id=\(transitionID, privacy: .public) status=waiting"
+    )
   }
 
   private func refreshSpaceInfo() {
@@ -334,9 +517,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) { [weak self] _ in
       Task { @MainActor [weak self] in
         guard let self else { return }
-        self.refreshSpaceInfo()
-        iss_reset_predictions()
-        self.menuBarController.scheduleRefresh(after: 0.2)
+        let effects = self.transitionCoordinator.receiveSpaceChange(self.loadSpaceSnapshot())
+        self.handleTransitionEffects(effects)
+
+        if !self.transitionCoordinator.isTransitionInFlight
+          && !self.transitionCoordinator.isRecovering
+        {
+          if !effects.contains(where: { effect in
+            if case .confirmed = effect { return true }
+            if case .reconciled = effect { return true }
+            return false
+          }) {
+            iss_reset_predictions()
+            self.refreshSpaceInfo()
+          }
+          self.menuBarController.scheduleRefresh(after: 0.2)
+        }
       }
     }
   }
@@ -386,13 +582,16 @@ extension AppDelegate: MenuBarControllerDelegate {
   func menuBarController(
     _ controller: MenuBarController, didRequestSwitchToSpaceAtIndex index: UInt32
   ) {
-    if !iss_switch_to_index(index) {
-      NSSound.beep()
-    }
-    controller.scheduleRefresh(after: 0.25)
+    performSpaceSwitchToIndex(index)
   }
 
   func menuBarControllerDidRequestRefresh(_ controller: MenuBarController) {
+    guard !transitionCoordinator.isTransitionInFlight,
+      !transitionCoordinator.isRecovering
+    else {
+      transitionLogger.debug("event=refresh_deferred reason=transition_active")
+      return
+    }
     refreshSpaceInfo()
   }
 }

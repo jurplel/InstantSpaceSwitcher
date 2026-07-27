@@ -50,6 +50,13 @@ final class OSDWindow {
     }
   }
 
+  func hideForSpaceTransition() {
+    hideTimer?.invalidate()
+    hideTimer = nil
+    window?.alphaValue = 0
+    window?.orderOut(nil)
+  }
+
   private func createWindow() {
     let windowSize: CGFloat = 140
 

@@ -56,7 +56,13 @@ Please follow the instructions [here](https://wiki.hacks.guide/wiki/Open_unsigne
 ## Background
 When I first bought a high refresh rate monitor, around ~2018, I could tell that the space switching animation was longer because it had scaled with the refresh rate. Because of this, I eventually stopped using spaces altogether, and have been looking for a solution ever since. 
 
-The workaround in this project is to create a synthetic trackpad gesture with an artificially high velocity. This effectively skips the animation.
+The workaround in this project is to create a synthetic trackpad gesture with an artificially high velocity. This effectively skips the animation. Space-switch requests are serialized and confirmed through `NSWorkspace.activeSpaceDidChangeNotification` before another gesture is injected or the OSD is shown.
+
+Transition diagnostics are available in unified logging:
+
+```sh
+log stream --style compact --predicate 'subsystem == "com.interversehq.InstantSpaceSwitcher" AND category == "space-transition"'
+```
 
 If you work at Apple, and your team owns the space switching animation, please fix this long-standing bug[^2] (and let us disable the animation natively, please).
 

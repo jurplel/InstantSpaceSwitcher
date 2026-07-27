@@ -67,7 +67,7 @@ static bool swipeFired = false;
 // Gesture speed state
 static double gestureSpeed = 2000.0;
 
-static ISSSwitchCallback switchCallback = NULL;
+static ISSSwipeCallback swipeCallback = NULL;
 
 // Predictions dictionary: DisplayID (CFStringRef) -> Index (CFNumberRef)
 static CFMutableDictionaryRef predictionsDict = NULL;
@@ -105,23 +105,8 @@ static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
 
-// Perform a swipe-override switch: get space info, compute target, switch,
-// and notify the handler with the target index.
-static void swipe_override_switch(ISSDirection dir) {
-    ISSSpaceInfo info;
-    if (!iss_get_space_info(&info)) {
-        iss_perform_switch_gesture(dir, gestureSpeed);
-        return;
-    }
-
-    unsigned int predicted;
-    unsigned int current = get_prediction(info.displayID, &predicted) ? predicted : info.currentIndex;
-    unsigned int target = dir == ISSDirectionLeft ? current - 1 : current + 1;
-
-    if (iss_switch_with_info(&info, dir)) {
-        set_prediction(info.displayID, target);
-        if (switchCallback) { switchCallback(target); }
-    }
+static void request_swipe_override_switch(ISSDirection direction) {
+    if (swipeCallback) { swipeCallback(direction); }
 }
 
 static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
@@ -175,7 +160,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                     ISSDirection dir =
                         progress > 0 ? ISSDirectionRight : ISSDirectionLeft;
                     swipeFired = true;
-                    swipe_override_switch(dir);
+                    request_swipe_override_switch(dir);
                 }
             }
             return NULL;
@@ -190,7 +175,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                     ISSDirection dir =
                         velocity > 0 ? ISSDirectionRight : ISSDirectionLeft;
                     swipeFired = true;
-                    swipe_override_switch(dir);
+                    request_swipe_override_switch(dir);
                 }
             }
             swipeTracking = false;
@@ -625,7 +610,6 @@ bool iss_switch(ISSDirection direction) {
             return false;
         }
         set_prediction(info.displayID, target);
-        if (switchCallback) { switchCallback(target); }
         return true;
     }
 
@@ -665,7 +649,6 @@ bool iss_switch_to_index(unsigned int targetIndex) {
     }
 
     set_prediction(info.displayID, targetIndex);
-    if (switchCallback) { switchCallback(targetIndex); }
     return !outOfBounds;
 }
 
@@ -687,6 +670,6 @@ void iss_reset_predictions(void) {
     }
 }
 
-void iss_set_switch_callback(ISSSwitchCallback callback) {
-    switchCallback = callback;
+void iss_set_swipe_callback(ISSSwipeCallback callback) {
+    swipeCallback = callback;
 }
