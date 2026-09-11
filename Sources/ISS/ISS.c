@@ -6,9 +6,11 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <float.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static const CGEventField kCGSEventTypeField = (CGEventField)55;
@@ -65,7 +67,10 @@ static bool swipeTracking = false;
 static bool swipeFired = false;
 
 // Gesture speed state
-static double gestureSpeed = 2000.0;
+static double gestureSpeed = ISS_DEFAULT_GESTURE_SPEED;
+static double animationDuration = 0.0;
+static double animationEaseIn = 0.1;
+static double animationEaseOut = 0.1;
 
 static ISSSwitchCallback switchCallback = NULL;
 
@@ -422,36 +427,170 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
     return !iss_should_block_switch(&info, direction);
 }
 
-static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
+// One gesture at a time, on the main run loop. New requests finish the current
+// slide first, so repeated shortcuts cannot build up a queue of animations.
+// Dock progress is gesture travel, not a normalized desktop position. In the
+// macOS 26.6.2 trial, travel 1 reached roughly halfway before release. Keep this
+// calibration separate from the timing curve; verify it on other macOS builds.
+static const double swipeTravel = 2.0;
+static struct {
+    CGEventRef event;
+    CFRunLoopTimerRef timer;
+    uint64_t start;
+    double duration;
+    double easeIn;
+    double easeOut;
+    double sign;
+    bool controlled;
+    bool destinationPosted;
+    void (*post)(CGEventRef);
+} animation;
+
+static CGEventRef iss_create_dock_swipe(ISSDirection direction) {
     const bool isRight = (direction == ISSDirectionRight);
-    // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant.
-    const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
-
-    // Velocity of gesture based on speed setting
-    const double vel = isRight ? velocity : -velocity;
-
     CGEventRef ev = CGEventCreate(NULL);
-    if (!ev) {
-        return false;
-    }
+    if (!ev) return NULL;
     CGEventSetIntegerValueField(ev, kCGSEventTypeField, kCGSEventDockControl);
     CGEventSetIntegerValueField(ev, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
-    CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress, progress);
     CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
-    CGEventPost(kCGSessionEventTap, ev);
-    CFRelease(ev);
+    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress,
+                              isRight ? FLT_TRUE_MIN : -FLT_TRUE_MIN);
+    return ev;
+}
+
+static void iss_emit_swipe(CGSGesturePhase phase, double progress, double velocity) {
+    CGEventSetTimestamp(animation.event, clock_gettime_nsec_np(CLOCK_UPTIME_RAW));
+    CGEventSetIntegerValueField(animation.event, kCGEventGesturePhase, phase);
+    CGEventSetDoubleValueField(animation.event, kCGEventGestureSwipeProgress, animation.sign * progress);
+    CGEventSetDoubleValueField(animation.event, kCGEventGestureSwipeVelocityX, animation.sign * velocity);
+    CGEventSetDoubleValueField(animation.event, kCGEventGestureSwipeVelocityY, animation.sign * velocity);
+    if (animation.controlled) {
+        // The native gesture also carries phase/progress in companion fields.
+        // Field 135 stores the raw bits of a float, widened as an unsigned int.
+        float offset = (float)(animation.sign * progress);
+        uint32_t offsetBits;
+        memcpy(&offsetBits, &offset, sizeof(offsetBits));
+        CGEventSetIntegerValueField(animation.event, (CGEventField)134, phase);
+        CGEventSetIntegerValueField(animation.event, (CGEventField)135, offsetBits);
+    }
+    animation.post(animation.event);
+}
+
+static void iss_finish_animation(bool interrupted) {
+    if (!animation.event) return;
+    CFRunLoopTimerInvalidate(animation.timer);
+    CFRelease(animation.timer);
+    animation.timer = NULL;
+    // A normal slide has already reached its final travel on the previous
+    // tick. Release at rest: a huge exit velocity causes a visible acceleration
+    // if the Dock has not rendered all the preceding progress yet.
+    // Only interruption/shutdown should force an immediate finish.
+    if (interrupted) iss_emit_swipe(kCGSGesturePhaseChanged, swipeTravel, 0.0);
+    iss_emit_swipe(kCGSGesturePhaseEnded, swipeTravel, interrupted ? 2000.0 : 0.0);
+    CFRelease(animation.event);
+    animation.event = NULL;
+}
+
+double iss_animation_progress(double time, double easeIn, double easeOut) {
+    double t = isfinite(time) ? fmax(0.0, fmin(1.0, time)) : 0.0;
+    double start = isfinite(easeIn) ? fmax(0.0, fmin(0.5, easeIn)) : 0.1;
+    double end = isfinite(easeOut) ? fmax(0.0, fmin(0.5, easeOut)) : 0.1;
+    // Integrate a trapezoidal velocity profile. Normalizing by its area
+    // guarantees a full slide at t=1 for asymmetric ramps and linear motion.
+    double area = 1.0 - (start + end) / 2.0;
+    if (start > 0.0 && t < start) return t * t / (2.0 * start * area);
+    if (end > 0.0 && t > 1.0 - end) {
+        double remaining = 1.0 - t;
+        return 1.0 - remaining * remaining / (2.0 * end * area);
+    }
+    return (t - start / 2.0) / area;
+}
+
+void iss_set_animation_duration(double seconds) {
+    if (!isfinite(seconds) || seconds < 0.0) return;
+    animationDuration = seconds == 0.0 ? 0.0 : fmax(0.08, fmin(1.0, seconds));
+}
+
+void iss_set_animation_curve(double easeIn, double easeOut) {
+    if (!isfinite(easeIn) || !isfinite(easeOut)) return;
+    animationEaseIn = fmax(0.0, fmin(0.5, easeIn));
+    animationEaseOut = fmax(0.0, fmin(0.5, easeOut));
+}
+
+static void iss_animation_tick(CFRunLoopTimerRef timer, void *context) {
+    (void)timer;
+    (void)context;
+    if (animation.destinationPosted) {
+        iss_finish_animation(false);
+        return;
+    }
+    double elapsed = (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - animation.start) / 1e9;
+    double t = elapsed / animation.duration;
+    if (t >= 1.0) {
+        // Dock forwards progress through an asynchronous dispatch source.
+        // Leave one update interval between final progress and release so the
+        // final changed event can be consumed before the ended event.
+        iss_emit_swipe(kCGSGesturePhaseChanged, swipeTravel, 0.0);
+        animation.destinationPosted = true;
+        return;
+    }
+    double progress = iss_animation_progress(t, animation.easeIn, animation.easeOut);
+    iss_emit_swipe(kCGSGesturePhaseChanged, swipeTravel * progress, 0.0);
+}
+
+// Internal entry point accepts an event sink so tests can exercise the real
+// scheduling and interruption behavior without switching the user's desktop.
+bool iss_start_switch_animation(ISSDirection direction, double speed, void (*post)(CGEventRef)) {
+    if (!post || !isfinite(speed) || speed <= 0.0) return false;
+    CGEventRef event = iss_create_dock_swipe(direction);
+    if (!event) return false;
+
+    iss_finish_animation(true);
+    animation.event = event;
+    animation.sign = direction == ISSDirectionRight ? 1.0 : -1.0;
+    animation.post = post;
+    animation.controlled = speed < 2000.0;
+    animation.destinationPosted = false;
+
+    if (speed >= 2000.0) {
+        // Preserve the original three-event instant gesture, including its
+        // tiny signed progress. Mission Control needs the changed phase.
+        iss_emit_swipe(kCGSGesturePhaseBegan, FLT_TRUE_MIN, speed);
+        iss_emit_swipe(kCGSGesturePhaseChanged, FLT_TRUE_MIN, speed);
+        iss_emit_swipe(kCGSGesturePhaseEnded, FLT_TRUE_MIN, speed);
+        CFRelease(animation.event);
+        animation.event = NULL;
+        return true;
+    }
+
+    animation.duration = animationDuration > 0.0 ? animationDuration : fmax(0.08, fmin(0.35, 11.0 / speed));
+    animation.easeIn = animationEaseIn;
+    animation.easeOut = animationEaseOut;
+    animation.start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+    animation.timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 1.0 / 120.0,
+                                         1.0 / 120.0, 0, 0, iss_animation_tick, NULL);
+    if (!animation.timer) {
+        CFRelease(animation.event);
+        animation.event = NULL;
+        return false;
+    }
+    iss_emit_swipe(kCGSGesturePhaseBegan, FLT_TRUE_MIN, 0.0);
+    CFRunLoopAddTimer(CFRunLoopGetMain(), animation.timer, kCFRunLoopCommonModes);
     return true;
 }
 
+void iss_wait_for_pending_switch(void) {
+    while (animation.event) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
+    }
+}
+
+static void iss_post_gesture_event(CGEventRef event) {
+    CGEventPost(kCGSessionEventTap, event);
+}
+
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
-    // Send three gesture events--began, changed, and ended
-    // If we only send two then mission control doesn't work.
-    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction, velocity);
+    return iss_start_switch_animation(direction, velocity, iss_post_gesture_event);
 }
 
 /** @brief Walks a CGWindowListCopyWindowInfo result
@@ -569,6 +708,7 @@ bool iss_init(void) {
 }
 
 void iss_destroy(void) {
+    iss_finish_animation(true);
     if (predictionsDict) {
         CFRelease(predictionsDict);
         predictionsDict = NULL;
@@ -678,7 +818,7 @@ void iss_set_swipe_override(bool enabled) {
 }
 
 void iss_set_gesture_speed(double speed) {
-    gestureSpeed = speed;
+    if (isfinite(speed) && speed > 0.0) gestureSpeed = speed;
 }
 
 void iss_reset_predictions(void) {

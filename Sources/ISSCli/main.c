@@ -58,6 +58,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    iss_wait_for_pending_switch();
     iss_destroy();
     return 0;
 }

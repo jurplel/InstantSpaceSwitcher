@@ -4,13 +4,21 @@
 #include <stdbool.h>
 #include <CoreFoundation/CoreFoundation.h>
 
+// Match the Fast preset: retain a visible slide instead of skipping it.
+#define ISS_DEFAULT_GESTURE_SPEED 50.0
+
 /** @brief Initialize resources
  * @return true on success, false on failure
  */
 bool iss_init(void);
 
-/** @brief Clean up resources */
+/** @brief Finish any active gesture and clean up resources. Call on the main thread. */
 void iss_destroy(void);
+
+/** @brief Pump the main run loop until the pending slide finishes (for CLI use).
+ * Call on the main thread. The app's normal run loop handles this automatically.
+ */
+void iss_wait_for_pending_switch(void);
 
 /** @brief The direction to switch spaces towards */
 typedef enum {
@@ -28,7 +36,8 @@ typedef struct {
 } ISSSpaceInfo;
 
 /**
- * @brief Performs the space switch if the requested move is within bounds.
+ * @brief Starts the space switch if the requested move is within bounds.
+ * Call on the main thread. Animated switches advance on its run loop.
  * @param direction The direction to switch spaces towards
  * @return true if the switch was posted, false if blocked by bounds or errors
  */
@@ -67,7 +76,7 @@ bool iss_switch_to_index(unsigned int targetIndex);
  * @brief Enables or disables interception of trackpad horizontal swipe gestures.
  *
  * When enabled, native horizontal dock-swipe gestures are suppressed and
- * replaced with instant space switches (no sliding animation).
+ * replaced with space switches using the selected animation speed.
  * @param enabled true to intercept, false to pass gestures through normally.
  */
 void iss_set_swipe_override(bool enabled);
@@ -113,9 +122,26 @@ bool iss_is_mission_control_active(void);
 void iss_set_overlay_detection_enabled(bool enabled);
 
 /**
- * @brief Sets the gesture speed for swipe override
- * @param speed The velocity value for the gesture
+ * @brief Sets animation speed for shortcuts, CLI, and swipe override.
+ * @param speed Legacy speed value: 50 targets a 220ms slide; 2000 is instant.
+ * Positive finite values only. Native Dock rendering may add latency.
  */
 void iss_set_gesture_speed(double speed);
+
+/** @brief Override slide duration in seconds (0 restores speed presets).
+ * Positive values are clamped to 0.08–1.0 seconds. Instant still takes priority.
+ */
+void iss_set_animation_duration(double seconds);
+
+/** @brief Set the fraction of time spent accelerating and decelerating.
+ * Each value is clamped to 0–0.5. Defaults are 0.1 and 0.1.
+ * Settings apply to the next gesture, not a slide already in progress.
+ */
+void iss_set_animation_curve(double easeIn, double easeOut);
+
+/** @brief Evaluate normalized slide progress for a time in 0–1.
+ * Shared by the gesture driver and the settings preview.
+ */
+double iss_animation_progress(double time, double easeIn, double easeOut);
 
 #endif /* _ISS_H */

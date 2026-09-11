@@ -39,10 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       iss_set_swipe_override(true)
     }
 
-    let gestureSpeed = UserDefaults.standard.double(forKey: "gestureSpeed")
-    if gestureSpeed > 0 {
-      iss_set_gesture_speed(gestureSpeed)
-    }
+    AnimationSettings.load().apply()
 
     if UserDefaults.standard.object(forKey: "overlayDetectionEnabled") as? Bool ?? true {
       iss_set_overlay_detection_enabled(true)

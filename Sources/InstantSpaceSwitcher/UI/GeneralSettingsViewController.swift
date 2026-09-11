@@ -13,16 +13,12 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Show on-screen display in Mission Control", target: nil, action: nil)
   private let swipeOverrideCheckbox = NSButton(
     checkboxWithTitle: "Override swipe gesture", target: nil, action: nil)
-  private let animationSpeedPopup = NSPopUpButton()
-  private let animationSpeedLabel = NSTextField(labelWithString: "Animation Speed:")
   private let launchAtLoginCheckbox = NSButton(
     checkboxWithTitle: "Launch at login", target: nil, action: nil)
   private let hideMenuBarIconCheckbox = NSButton(
     checkboxWithTitle: "Hide menu bar icon", target: nil, action: nil)
 
   private let durationPresets = [100, 200, 300, 500, 750, 1000]
-  private let animationSpeedOptions = ["Normal", "Fast", "Faster", "Fastest", "Instant"]
-  private let animationSpeedValues: [Double] = [40.0, 50.0, 60.0, 80.0, 2000.0]
 
   private let defaults = UserDefaults.standard
 
@@ -53,8 +49,6 @@ final class GeneralSettingsViewController: NSViewController {
     showOSDInMissionControlCheckbox.action = #selector(showOSDInMissionControlChanged)
     swipeOverrideCheckbox.target = self
     swipeOverrideCheckbox.action = #selector(swipeOverrideChanged)
-    animationSpeedPopup.target = self
-    animationSpeedPopup.action = #selector(animationSpeedChanged)
     launchAtLoginCheckbox.target = self
     launchAtLoginCheckbox.action = #selector(launchAtLoginChanged)
     hideMenuBarIconCheckbox.target = self
@@ -62,7 +56,6 @@ final class GeneralSettingsViewController: NSViewController {
 
     // Populate data
     for duration in durationPresets { osdDurationPopup.addItem(withTitle: "\(duration)ms") }
-    for speed in animationSpeedOptions { animationSpeedPopup.addItem(withTitle: speed) }
 
     // System
     let systemLabel = NSTextField(labelWithString: "System:")
@@ -81,11 +74,6 @@ final class GeneralSettingsViewController: NSViewController {
     overlayDetectionCheckbox.attributedTitle = experimentalTitle
     
     formView.addRow(label: nil, control: overlayDetectionCheckbox)
-    formView.addSectionSpacing()
-
-    // Animation Speed
-    let animationLabel = NSTextField(labelWithString: "Animation Speed:")
-    formView.addRow(label: animationLabel, control: animationSpeedPopup)
     formView.addSectionSpacing()
 
     // OSD
@@ -124,17 +112,6 @@ final class GeneralSettingsViewController: NSViewController {
     hideMenuBarIconCheckbox.state = defaults.bool(forKey: "hideMenuBarIcon") ? .on : .off
     swipeOverrideCheckbox.state = defaults.bool(forKey: "swipeOverride") ? .on : .off
 
-    let animationSpeedValue = defaults.double(forKey: "gestureSpeed")
-    if animationSpeedValue > 0 {
-      if let index = animationSpeedValues.firstIndex(where: { $0 == animationSpeedValue }) {
-        animationSpeedPopup.selectItem(at: index)
-      } else {
-        animationSpeedPopup.selectItem(at: 4)
-      }
-    } else {
-      animationSpeedPopup.selectItem(at: 4)
-    }
-
     launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
   }
 
@@ -169,21 +146,6 @@ final class GeneralSettingsViewController: NSViewController {
     let isEnabled = sender.state == .on
     defaults.set(isEnabled, forKey: "swipeOverride")
     iss_set_swipe_override(isEnabled)
-  }
-
-  @objc private func animationSpeedChanged(_ sender: NSPopUpButton) {
-    let index = sender.indexOfSelectedItem
-    guard index >= 0 && index < animationSpeedOptions.count else { return }
-
-    var velocity: Double
-    if index < animationSpeedValues.count {
-      velocity = animationSpeedValues[index]
-    } else {
-      velocity = 2000.0
-    }
-
-    defaults.set(velocity, forKey: "gestureSpeed")
-    iss_set_gesture_speed(velocity)
   }
 
   @objc private func hideMenuBarIconChanged(_ sender: NSButton) {
