@@ -9,6 +9,16 @@
  */
 bool iss_init(void);
 
+/**
+ * @brief Recreates the session event tap without resetting predictions/settings.
+ *
+ * Useful after launch/login-item races: kCGHeadInsertEventTap only guarantees
+ * head position at install time, so a later app instance can otherwise receive
+ * physical swipe events before us.
+ * @return true on success, false on failure
+ */
+bool iss_reinstall_event_tap(void);
+
 /** @brief Clean up resources */
 void iss_destroy(void);
 

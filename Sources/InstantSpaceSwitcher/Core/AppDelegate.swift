@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private var cancellables = Set<AnyCancellable>()
   private var spaceChangeObserver: Any?
   private var appActivationObserver: Any?
+  private var appLaunchObserver: Any?
+  private var swipeOverrideTapRefreshWorkItems: [DispatchWorkItem] = []
 
   func applicationWillFinishLaunching(_ notification: Notification) {
     NSAppleEventManager.shared().setEventHandler(
@@ -28,14 +30,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    registerDefaultSettings()
+    terminateSiblingInstantSpaceSwitcherApps()
     ensureAccessibilityPermission()
+    ensureEventTapPermission()
 
     if !iss_init() {
       print("Failed to initialize ISS event tap")
       retryIssInit()
     }
 
-    if UserDefaults.standard.bool(forKey: "swipeOverride") {
+    let swipeOverrideEnabled = UserDefaults.standard.bool(forKey: "swipeOverride")
+    if swipeOverrideEnabled {
       iss_set_swipe_override(true)
     }
 
@@ -46,6 +52,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     if UserDefaults.standard.object(forKey: "overlayDetectionEnabled") as? Bool ?? true {
       iss_set_overlay_detection_enabled(true)
+    }
+
+    if swipeOverrideEnabled {
+      scheduleSwipeOverrideTapRefresh()
     }
 
     iss_set_switch_callback { newSpaceIndex in
@@ -65,17 +75,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     bindHotkeys()
     observeSpaceChanges()
     observeAppActivation()
+    observeAppLaunches()
     refreshSpaceInfo()
   }
 
+  private func registerDefaultSettings() {
+    UserDefaults.standard.register(defaults: [
+      "swipeOverride": true,
+      "gestureSpeed": 2000.0,
+      "overlayDetectionEnabled": true,
+      "osdDurationMs": 200
+    ])
+  }
+
   func applicationWillTerminate(_ notification: Notification) {
+    cancelSwipeOverrideTapRefresh()
     iss_destroy()
     stopObservingSpaceChanges()
     stopObservingAppActivation()
+    stopObservingAppLaunches()
   }
 
   private func retryIssInit() {
-    guard !iss_init() else { return }
+    guard !iss_init() else {
+      if UserDefaults.standard.bool(forKey: "swipeOverride") {
+        scheduleSwipeOverrideTapRefresh()
+      }
+      return
+    }
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
       self?.retryIssInit()
     }
@@ -95,6 +122,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
     let options = [promptKey: true] as CFDictionary
     _ = AXIsProcessTrustedWithOptions(options)
+  }
+
+  private func ensureEventTapPermission() {
+    if !CGPreflightListenEventAccess() {
+      _ = CGRequestListenEventAccess()
+    }
+    if !CGPreflightPostEventAccess() {
+      _ = CGRequestPostEventAccess()
+    }
+  }
+
+  private func scheduleSwipeOverrideTapRefresh() {
+    cancelSwipeOverrideTapRefresh()
+    guard UserDefaults.standard.bool(forKey: "swipeOverride") else { return }
+
+    // Login items can start multiple copies in either order. Reinstalling soon
+    // after launch keeps this process at the head of the session tap chain.
+    for delay in [0.25, 0.75, 1.5, 3.0] {
+      let workItem = DispatchWorkItem { [weak self] in
+        self?.refreshSwipeOverrideTap()
+      }
+      swipeOverrideTapRefreshWorkItems.append(workItem)
+      DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+  }
+
+  private func cancelSwipeOverrideTapRefresh() {
+    swipeOverrideTapRefreshWorkItems.forEach { $0.cancel() }
+    swipeOverrideTapRefreshWorkItems.removeAll()
+  }
+
+  private func refreshSwipeOverrideTap() {
+    guard UserDefaults.standard.bool(forKey: "swipeOverride") else { return }
+
+    guard iss_reinstall_event_tap() else {
+      print("Failed to refresh ISS event tap")
+      retryIssInit()
+      return
+    }
   }
 
   private func setupMainMenu() {
@@ -366,6 +432,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       NSWorkspace.shared.notificationCenter.removeObserver(observer)
       appActivationObserver = nil
     }
+  }
+
+  private func observeAppLaunches() {
+    stopObservingAppLaunches()
+    appLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didLaunchApplicationNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+          return
+        }
+        guard self.isSiblingInstantSpaceSwitcher(app) else { return }
+        app.terminate()
+        self.scheduleSwipeOverrideTapRefresh()
+      }
+    }
+  }
+
+  private func stopObservingAppLaunches() {
+    if let observer = appLaunchObserver {
+      NSWorkspace.shared.notificationCenter.removeObserver(observer)
+      appLaunchObserver = nil
+    }
+  }
+
+  private func isSiblingInstantSpaceSwitcher(_ app: NSRunningApplication) -> Bool {
+    guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return false }
+    guard let bundleIdentifier = app.bundleIdentifier else { return false }
+
+    let bundlePrefix = "com.interversehq.InstantSpaceSwitcher"
+    return bundleIdentifier == bundlePrefix || bundleIdentifier.hasPrefix("\(bundlePrefix).")
+  }
+
+  private func terminateSiblingInstantSpaceSwitcherApps() {
+    NSWorkspace.shared.runningApplications
+      .filter(isSiblingInstantSpaceSwitcher)
+      .forEach { $0.terminate() }
   }
 
 }
