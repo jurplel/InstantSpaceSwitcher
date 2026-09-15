@@ -47,6 +47,8 @@ struct HotkeyCombination: Codable, Equatable {
     keyEquivalent: "-" 
   )
 
+  static let unbound = HotkeyCombination(keyCode: 0, modifiers: 0, displayKey: "", keyEquivalent: "")
+
   static func defaultForSpace(_ number: Int) -> HotkeyCombination {
     let keyCode: UInt32
     let displayKey: String
@@ -244,6 +246,8 @@ enum HotkeyIdentifier: String, CaseIterable {
   case space1, space2, space3, space4, space5
   case space6, space7, space8, space9, space10
   case lastSpace
+  case moveWindowSpace1, moveWindowSpace2, moveWindowSpace3, moveWindowSpace4, moveWindowSpace5
+  case moveWindowSpace6, moveWindowSpace7, moveWindowSpace8, moveWindowSpace9, moveWindowSpace10
   
   var displayName: String {
     switch self {
@@ -260,6 +264,32 @@ enum HotkeyIdentifier: String, CaseIterable {
     case .space9: return "Switch to space 9"
     case .space10: return "Switch to space 10"
     case .lastSpace: return "Switch to last used space"
+    case .moveWindowSpace1: return "Move active window to space 1"
+    case .moveWindowSpace2: return "Move active window to space 2"
+    case .moveWindowSpace3: return "Move active window to space 3"
+    case .moveWindowSpace4: return "Move active window to space 4"
+    case .moveWindowSpace5: return "Move active window to space 5"
+    case .moveWindowSpace6: return "Move active window to space 6"
+    case .moveWindowSpace7: return "Move active window to space 7"
+    case .moveWindowSpace8: return "Move active window to space 8"
+    case .moveWindowSpace9: return "Move active window to space 9"
+    case .moveWindowSpace10: return "Move active window to space 10"
+    }
+  }
+
+  var moveWindowSpaceIndex: UInt32? {
+    switch self {
+    case .moveWindowSpace1: return 0
+    case .moveWindowSpace2: return 1
+    case .moveWindowSpace3: return 2
+    case .moveWindowSpace4: return 3
+    case .moveWindowSpace5: return 4
+    case .moveWindowSpace6: return 5
+    case .moveWindowSpace7: return 6
+    case .moveWindowSpace8: return 7
+    case .moveWindowSpace9: return 8
+    case .moveWindowSpace10: return 9
+    default: return nil
     }
   }
 }
@@ -280,6 +310,7 @@ final class HotkeyStore: ObservableObject {
   @Published private(set) var space9Hotkey: HotkeyCombination
   @Published private(set) var space10Hotkey: HotkeyCombination
   @Published private(set) var spaceLastSpaceHotkey: HotkeyCombination
+  @Published private(set) var moveWindowHotkeys: [HotkeyIdentifier: HotkeyCombination]
   @Published private(set) var enabledStates: [HotkeyIdentifier: Bool] = [:]
 
   private let defaults: UserDefaults
@@ -299,10 +330,14 @@ final class HotkeyStore: ObservableObject {
     space9Hotkey = defaults.hotkey(forKey: DefaultsKey.space9.rawValue) ?? .defaultForSpace(9)
     space10Hotkey = defaults.hotkey(forKey: DefaultsKey.space10.rawValue) ?? .defaultForSpace(10)
     spaceLastSpaceHotkey = defaults.hotkey(forKey: DefaultsKey.lastSpace.rawValue) ?? .defaultLastSpace
+    moveWindowHotkeys = Dictionary(uniqueKeysWithValues: HotkeyIdentifier.allCases.compactMap { identifier in
+      guard identifier.moveWindowSpaceIndex != nil else { return nil }
+      return (identifier, defaults.hotkey(forKey: "hotkey.\(identifier.rawValue)") ?? .unbound)
+    })
 
     for identifier in HotkeyIdentifier.allCases {
       let key = "enabled.\(identifier.rawValue)"
-      enabledStates[identifier] = defaults.object(forKey: key) as? Bool ?? true
+      enabledStates[identifier] = defaults.object(forKey: key) as? Bool ?? (identifier.moveWindowSpaceIndex == nil)
     }
   }
 
@@ -360,6 +395,11 @@ final class HotkeyStore: ObservableObject {
       guard combination != spaceLastSpaceHotkey else { return }
       spaceLastSpaceHotkey = combination
       defaults.setHotkey(combination, forKey: DefaultsKey.lastSpace.rawValue)
+    case .moveWindowSpace1, .moveWindowSpace2, .moveWindowSpace3, .moveWindowSpace4, .moveWindowSpace5,
+         .moveWindowSpace6, .moveWindowSpace7, .moveWindowSpace8, .moveWindowSpace9, .moveWindowSpace10:
+      guard moveWindowHotkeys[identifier] != combination else { return }
+      moveWindowHotkeys[identifier] = combination
+      defaults.setHotkey(combination, forKey: "hotkey.\(identifier.rawValue)")
     }
   }
 
@@ -377,6 +417,10 @@ final class HotkeyStore: ObservableObject {
     space9Hotkey = .defaultForSpace(9)
     space10Hotkey = .defaultForSpace(10)
     spaceLastSpaceHotkey = .defaultLastSpace
+    for identifier in HotkeyIdentifier.allCases where identifier.moveWindowSpaceIndex != nil {
+      moveWindowHotkeys[identifier] = .unbound
+      defaults.setHotkey(.unbound, forKey: "hotkey.\(identifier.rawValue)")
+    }
 
     defaults.setHotkey(leftHotkey, forKey: DefaultsKey.left.rawValue)
     defaults.setHotkey(rightHotkey, forKey: DefaultsKey.right.rawValue)
@@ -408,11 +452,14 @@ final class HotkeyStore: ObservableObject {
     case .space9: return space9Hotkey
     case .space10: return space10Hotkey
     case .lastSpace: return spaceLastSpaceHotkey
+    case .moveWindowSpace1, .moveWindowSpace2, .moveWindowSpace3, .moveWindowSpace4, .moveWindowSpace5,
+         .moveWindowSpace6, .moveWindowSpace7, .moveWindowSpace8, .moveWindowSpace9, .moveWindowSpace10:
+      return moveWindowHotkeys[identifier] ?? .unbound
     }
   }
 
   func isEnabled(_ identifier: HotkeyIdentifier) -> Bool {
-    return enabledStates[identifier] ?? true
+    return enabledStates[identifier] ?? (identifier.moveWindowSpaceIndex == nil)
   }
 
   func setEnabled(_ enabled: Bool, for identifier: HotkeyIdentifier) {

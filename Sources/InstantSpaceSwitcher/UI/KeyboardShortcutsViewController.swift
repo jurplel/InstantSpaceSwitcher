@@ -231,6 +231,9 @@ extension KeyboardShortcutsViewController: NSTableViewDelegate {
     case .space9: defaultCombination = .defaultForSpace(9)
     case .space10: defaultCombination = .defaultForSpace(10)
     case .lastSpace: defaultCombination = .defaultLastSpace
+    case .moveWindowSpace1, .moveWindowSpace2, .moveWindowSpace3, .moveWindowSpace4, .moveWindowSpace5,
+         .moveWindowSpace6, .moveWindowSpace7, .moveWindowSpace8, .moveWindowSpace9, .moveWindowSpace10:
+      defaultCombination = .unbound
     }
     store.update(defaultCombination, for: identifier)
   }
@@ -253,8 +256,9 @@ extension KeyboardShortcutsViewController: NSTableViewDelegate {
   private func handleRecordingResult(
     _ combination: HotkeyCombination, for identifier: HotkeyIdentifier
   ) {
-    let otherIdentifier: HotkeyIdentifier = identifier == .left ? .right : .left
-    if store.combination(for: otherIdentifier) == combination {
+    if combination.isValid && HotkeyIdentifier.allCases.contains(where: {
+      $0 != identifier && store.combination(for: $0) == combination
+    }) {
       NSSound.beep()
       let alert = NSAlert()
       alert.messageText = "Shortcut already in use"
