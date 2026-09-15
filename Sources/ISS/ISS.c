@@ -185,6 +185,10 @@ static bool iss_requires_event_augmentation(void) {
     return cachedResult;
 }
 
+ISSDirection iss_direction_from_hardware_swipe(double value) {
+    return value > 0 ? ISSDirectionRight : ISSDirectionLeft;
+}
+
 static int32_t iss_double_to_fixed_1616(double value) {
     int32_t fixed = (int32_t)(value * 65536.0);
     if (fixed == 0 && value != 0.0) return value > 0.0 ? 1 : -1;
@@ -357,10 +361,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                 double progress =
                     CGEventGetDoubleValueField(event, kCGEventGestureSwipeProgress);
                 if (progress != 0.0) {
-                    ISSDirection dir =
-                        iss_requires_event_augmentation()
-                            ? (progress < 0 ? ISSDirectionRight : ISSDirectionLeft)
-                            : (progress > 0 ? ISSDirectionRight : ISSDirectionLeft);
+                    ISSDirection dir = iss_direction_from_hardware_swipe(progress);
                     swipeFired = true;
                     swipe_override_switch(dir);
                 }
@@ -374,10 +375,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                 double velocity =
                     CGEventGetDoubleValueField(event, kCGEventGestureSwipeVelocityX);
                 if (velocity != 0.0) {
-                    ISSDirection dir =
-                        iss_requires_event_augmentation()
-                            ? (velocity < 0 ? ISSDirectionRight : ISSDirectionLeft)
-                            : (velocity > 0 ? ISSDirectionRight : ISSDirectionLeft);
+                    ISSDirection dir = iss_direction_from_hardware_swipe(velocity);
                     swipeFired = true;
                     swipe_override_switch(dir);
                 }

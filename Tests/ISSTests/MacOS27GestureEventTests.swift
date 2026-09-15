@@ -9,12 +9,20 @@ private func iss_create_macos27_dock_swipe_event_data_for_testing(
   _ phase: Int32, _ direction: Int32
 ) -> Unmanaged<CFData>?
 
+@_silgen_name("iss_direction_from_hardware_swipe")
+private func iss_direction_from_hardware_swipe(_ value: Double) -> Int32
+
 final class MacOS27GestureEventTests: XCTestCase {
   func testEventAugmentationStartsAtMacOS27() {
     XCTAssertFalse(iss_requires_event_augmentation_for_version("26.6"))
     XCTAssertTrue(iss_requires_event_augmentation_for_version("27.0"))
     XCTAssertTrue(iss_requires_event_augmentation_for_version("28.0"))
     XCTAssertFalse(iss_requires_event_augmentation_for_version("invalid"))
+  }
+
+  func testHardwareSwipeDirectionMatchesPhysicalDirectionOnMacOS27() {
+    XCTAssertEqual(iss_direction_from_hardware_swipe(-0.1), 0)
+    XCTAssertEqual(iss_direction_from_hardware_swipe(0.1), 1)
   }
 
   func testAugmentedDockSwipeCarriesRawIOHIDPayloadForEveryPhase() throws {
