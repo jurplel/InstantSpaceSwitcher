@@ -6,9 +6,12 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <float.h>
+#include <mach/mach_time.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 static const CGEventField kCGSEventTypeField = (CGEventField)55;
@@ -18,6 +21,11 @@ static const CGEventField kCGEventGestureSwipeProgress = (CGEventField)124;
 static const CGEventField kCGEventGestureSwipeVelocityX = (CGEventField)129;
 static const CGEventField kCGEventGestureSwipeVelocityY = (CGEventField)130;
 static const CGEventField kCGEventGesturePhase = (CGEventField)132;
+static const CGEventField kCGEventGesturePhaseAlias = (CGEventField)134;
+static const CGEventField kCGEventGestureZoomDeltaY = (CGEventField)138;
+static const CGEventField kCGEventGestureSwipePositionX = (CGEventField)125;
+static const CGEventField kCGEventSourceProcessAlias = (CGEventField)169;
+static const CGEventField kCGEventRawIOHIDPayload = (CGEventField)4205;
 
 // See IOHIDEventType enum in IOHIDFamily
 static const uint32_t kIOHIDEventTypeDockSwipe = 23;
@@ -69,6 +77,56 @@ static double gestureSpeed = 2000.0;
 
 static ISSSwitchCallback switchCallback = NULL;
 
+// Synthetic macOS 27 events can re-enter our event tap with a source PID of
+// zero, so source PID alone cannot distinguish them from hardware events.
+static unsigned int syntheticEventsToPassThrough = 0;
+
+// macOS 27 validates synthetic dock swipes against a serialized IOHID queue
+// payload attached to CGEvent field 4205.
+#pragma pack(push, 1)
+typedef struct {
+    uint32_t size;
+    uint32_t type;
+    uint32_t options;
+    uint8_t depth;
+    uint8_t reserved[3];
+} IOHIDEventBase;
+
+typedef struct {
+    IOHIDEventBase base;
+    int32_t positionX;
+    int32_t positionY;
+    int32_t positionZ;
+    uint32_t swipeMask;
+    uint16_t gestureMotion;
+    uint16_t gestureFlavor;
+    int32_t swipeProgress;
+} IOHIDFluidTouchGestureData;
+
+typedef struct {
+    IOHIDEventBase base;
+    int32_t velocityX;
+    int32_t velocityY;
+    int32_t velocityZ;
+} IOHIDVelocityEventData;
+
+typedef struct {
+    uint64_t timestamp;
+    uint64_t senderID;
+    uint32_t options;
+    uint32_t attributeLength;
+    uint32_t eventCount;
+} IOHIDSystemQueueElementHeader;
+#pragma pack(pop)
+
+_Static_assert(sizeof(IOHIDEventBase) == 16, "unexpected IOHID event base layout");
+_Static_assert(sizeof(IOHIDFluidTouchGestureData) == 40, "unexpected fluid gesture layout");
+_Static_assert(sizeof(IOHIDVelocityEventData) == 28, "unexpected velocity event layout");
+_Static_assert(sizeof(IOHIDSystemQueueElementHeader) == 28, "unexpected queue header layout");
+
+static const uint32_t kIOHIDEventTypeVelocity = 9;
+static const uint16_t kIOHIDGestureFlavorDockPrimary = 3;
+
 // Predictions dictionary: DisplayID (CFStringRef) -> Index (CFNumberRef)
 static CFMutableDictionaryRef predictionsDict = NULL;
 
@@ -105,6 +163,124 @@ static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
 
+bool iss_requires_event_augmentation_for_version(const char *version) {
+    if (!version) return false;
+
+    int major = 0;
+    return sscanf(version, "%d", &major) == 1 && major >= 27;
+}
+
+static bool iss_requires_event_augmentation(void) {
+    static int cachedResult = -1;
+    if (cachedResult != -1) return cachedResult;
+
+    char version[32] = {0};
+    size_t size = sizeof(version);
+    if (sysctlbyname("kern.osproductversion", version, &size, NULL, 0) != 0) {
+        cachedResult = 0;
+        return false;
+    }
+
+    cachedResult = iss_requires_event_augmentation_for_version(version);
+    return cachedResult;
+}
+
+static int32_t iss_double_to_fixed_1616(double value) {
+    int32_t fixed = (int32_t)(value * 65536.0);
+    if (fixed == 0 && value != 0.0) return value > 0.0 ? 1 : -1;
+    return fixed;
+}
+
+static uint8_t *iss_generate_iohid_payload(CGEventRef event, size_t *outLength) {
+    const CGSGesturePhase phase = (CGSGesturePhase)CGEventGetIntegerValueField(event, kCGEventGesturePhase);
+    const int64_t motion = CGEventGetIntegerValueField(event, kCGEventGestureSwipeMotion);
+    const double progress = CGEventGetDoubleValueField(event, kCGEventGestureSwipeProgress);
+    const double positionX = CGEventGetDoubleValueField(event, kCGEventGestureSwipePositionX);
+    const double velocityX = CGEventGetDoubleValueField(event, kCGEventGestureSwipeVelocityX);
+    const double velocityY = CGEventGetDoubleValueField(event, kCGEventGestureSwipeVelocityY);
+    const bool includeVelocity = velocityX != 0.0 || velocityY != 0.0 || phase == kCGSGesturePhaseEnded;
+    const uint32_t eventCount = includeVelocity ? 2 : 1;
+    size_t payloadLength = sizeof(IOHIDSystemQueueElementHeader) + sizeof(IOHIDFluidTouchGestureData);
+    if (includeVelocity) payloadLength += sizeof(IOHIDVelocityEventData);
+
+    uint8_t *payload = calloc(1, payloadLength);
+    if (!payload) return NULL;
+
+    IOHIDSystemQueueElementHeader *header = (IOHIDSystemQueueElementHeader *)payload;
+    const uint64_t timestamp = CGEventGetTimestamp(event);
+    header->timestamp = timestamp ? timestamp : mach_absolute_time();
+    header->eventCount = eventCount;
+
+    IOHIDFluidTouchGestureData *fluid =
+        (IOHIDFluidTouchGestureData *)(payload + sizeof(IOHIDSystemQueueElementHeader));
+    fluid->base.size = sizeof(IOHIDFluidTouchGestureData);
+    fluid->base.type = kIOHIDEventTypeDockSwipe;
+    fluid->base.options = (uint32_t)((phase & 0xFF) << 24);
+    fluid->positionX = iss_double_to_fixed_1616(positionX);
+    fluid->gestureMotion = (uint16_t)motion;
+    fluid->gestureFlavor = kIOHIDGestureFlavorDockPrimary;
+    fluid->swipeProgress = iss_double_to_fixed_1616(progress);
+
+    if (includeVelocity) {
+        IOHIDVelocityEventData *velocity = (IOHIDVelocityEventData *)(
+            payload + sizeof(IOHIDSystemQueueElementHeader) + sizeof(IOHIDFluidTouchGestureData));
+        velocity->base.size = sizeof(IOHIDVelocityEventData);
+        velocity->base.type = kIOHIDEventTypeVelocity;
+        velocity->base.depth = 1;
+        velocity->velocityX = iss_double_to_fixed_1616(velocityX);
+        velocity->velocityY = iss_double_to_fixed_1616(velocityY);
+    }
+
+    *outLength = payloadLength;
+    return payload;
+}
+
+static CGEventRef iss_augment_dock_swipe_event(CGEventRef event) {
+    if (!event) return NULL;
+
+    CFDataRef data = CGEventCreateData(kCFAllocatorDefault, event);
+    if (!data) return NULL;
+
+    const uint8_t *bytes = CFDataGetBytePtr(data);
+    const CFIndex length = CFDataGetLength(data);
+    if (length < 4 || bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 0 || bytes[3] != 2) {
+        CFRelease(data);
+        return NULL;
+    }
+
+    size_t payloadLength = 0;
+    uint8_t *payload = iss_generate_iohid_payload(event, &payloadLength);
+    if (!payload) {
+        CFRelease(data);
+        return NULL;
+    }
+
+    const size_t newLength = (size_t)length + 4 + payloadLength;
+    uint8_t *newBytes = malloc(newLength);
+    if (!newBytes) {
+        free(payload);
+        CFRelease(data);
+        return NULL;
+    }
+
+    memcpy(newBytes, bytes, (size_t)length);
+    newBytes[length] = (uint8_t)(payloadLength >> 8);
+    newBytes[length + 1] = (uint8_t)payloadLength;
+    newBytes[length + 2] = (uint8_t)(kCGEventRawIOHIDPayload >> 8);
+    newBytes[length + 3] = (uint8_t)kCGEventRawIOHIDPayload;
+    memcpy(newBytes + length + 4, payload, payloadLength);
+
+    free(payload);
+    CFRelease(data);
+    CFDataRef augmentedData = CFDataCreate(kCFAllocatorDefault, newBytes, (CFIndex)newLength);
+    free(newBytes);
+    if (!augmentedData) return NULL;
+
+    CGEventRef result = CGEventCreateFromData(kCFAllocatorDefault, augmentedData);
+    CFRelease(augmentedData);
+    return result;
+}
+
 // Perform a swipe-override switch: get space info, compute target, switch,
 // and notify the handler with the target index.
 static void swipe_override_switch(ISSDirection dir) {
@@ -114,13 +290,16 @@ static void swipe_override_switch(ISSDirection dir) {
         return;
     }
 
+    const bool canMove = !iss_should_block_switch(&info, dir);
     unsigned int predicted;
     unsigned int current = get_prediction(info.displayID, &predicted) ? predicted : info.currentIndex;
     unsigned int target = dir == ISSDirectionLeft ? current - 1 : current + 1;
 
     if (iss_switch_with_info(&info, dir)) {
-        set_prediction(info.displayID, target);
-        if (switchCallback) { switchCallback(target); }
+        if (canMove) {
+            set_prediction(info.displayID, target);
+            if (switchCallback) { switchCallback(target); }
+        }
     }
 }
 
@@ -139,6 +318,12 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
 
     CGSEventType eventType =
         (CGSEventType)CGEventGetIntegerValueField(event, kCGSEventTypeField);
+
+    if (syntheticEventsToPassThrough > 0 &&
+        (eventType == kCGSEventDockControl || eventType == kCGSEventGesture)) {
+        syntheticEventsToPassThrough--;
+        return event;
+    }
 
     // Pass through synthetic events (non-HID source). Real gesture events
     // from the trackpad have sourcePid == 0 (HID kernel).
@@ -173,7 +358,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                     CGEventGetDoubleValueField(event, kCGEventGestureSwipeProgress);
                 if (progress != 0.0) {
                     ISSDirection dir =
-                        progress > 0 ? ISSDirectionRight : ISSDirectionLeft;
+                        iss_requires_event_augmentation()
+                            ? (progress < 0 ? ISSDirectionRight : ISSDirectionLeft)
+                            : (progress > 0 ? ISSDirectionRight : ISSDirectionLeft);
                     swipeFired = true;
                     swipe_override_switch(dir);
                 }
@@ -188,13 +375,23 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                     CGEventGetDoubleValueField(event, kCGEventGestureSwipeVelocityX);
                 if (velocity != 0.0) {
                     ISSDirection dir =
-                        velocity > 0 ? ISSDirectionRight : ISSDirectionLeft;
+                        iss_requires_event_augmentation()
+                            ? (velocity < 0 ? ISSDirectionRight : ISSDirectionLeft)
+                            : (velocity > 0 ? ISSDirectionRight : ISSDirectionLeft);
                     swipeFired = true;
                     swipe_override_switch(dir);
                 }
             }
             swipeTracking = false;
             swipeFired = false;
+            if (iss_requires_event_augmentation()) {
+                // Dock needs the terminal hardware event to close its native
+                // gesture state after our synthetic macOS 27 sequence.
+                CGEventSetDoubleValueField(event, kCGEventGestureSwipeVelocityX, 0);
+                CGEventSetDoubleValueField(event, kCGEventGestureSwipeVelocityY, 0);
+                CGEventSetDoubleValueField(event, kCGEventGestureSwipeProgress, 0);
+                return event;
+            }
             return NULL;
         }
 
@@ -444,7 +641,83 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     return true;
 }
 
+static CGEventRef iss_create_macos27_dock_swipe_event(CGSGesturePhase phase,
+                                                       ISSDirection direction) {
+    CGEventRef event = CGEventCreate(NULL);
+    if (!event) return NULL;
+
+    const bool isRight = direction == ISSDirectionRight;
+    CGEventSetIntegerValueField(event, kCGSEventTypeField, kCGSEventDockControl);
+    CGEventSetIntegerValueField(event, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+    CGEventSetIntegerValueField(event, kCGEventGesturePhase, phase);
+    CGEventSetDoubleValueField(event, kCGEventGestureSwipeProgress, isRight ? -1.0 : 1.0);
+    CGEventSetIntegerValueField(event, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
+    CGEventSetIntegerValueField(event, kCGEventGesturePhaseAlias, phase);
+    CGEventSetDoubleValueField(event, kCGEventGestureZoomDeltaY, 3.0);
+    CGEventSetDoubleValueField(event, kCGEventSourceProcessAlias, (double)mach_absolute_time());
+    CGEventSetDoubleValueField(event, kCGEventGestureSwipePositionX, 0.1);
+    if (phase == kCGSGesturePhaseEnded) {
+        CGEventSetDoubleValueField(event, kCGEventGestureSwipeVelocityX,
+                                   isRight ? -9999.0 : 9999.0);
+    }
+    return event;
+}
+
+static bool iss_post_macos27_dock_swipe_pair(CGEventRef dockEvent) {
+    CGEventRef companion = CGEventCreate(NULL);
+    if (!companion) {
+        CFRelease(dockEvent);
+        return false;
+    }
+
+    CGEventSetIntegerValueField(companion, kCGSEventTypeField, kCGSEventGesture);
+    syntheticEventsToPassThrough += 2;
+    CGEventPost(kCGSessionEventTap, dockEvent);
+    CGEventPost(kCGSessionEventTap, companion);
+    CFRelease(dockEvent);
+    CFRelease(companion);
+    return true;
+}
+
+static bool iss_perform_macos27_switch_gesture(ISSDirection direction) {
+    const CGSGesturePhase phases[] = {
+        kCGSGesturePhaseBegan,
+        kCGSGesturePhaseChanged,
+        kCGSGesturePhaseEnded,
+    };
+
+    for (size_t index = 0; index < sizeof(phases) / sizeof(phases[0]); index++) {
+        CGEventRef event = iss_create_macos27_dock_swipe_event(phases[index], direction);
+        if (!event) return false;
+
+        CGEventRef augmentedEvent = iss_augment_dock_swipe_event(event);
+        CFRelease(event);
+        if (!augmentedEvent) return false;
+
+        if (!iss_post_macos27_dock_swipe_pair(augmentedEvent)) return false;
+    }
+    return true;
+}
+
+CFDataRef iss_create_macos27_dock_swipe_event_data_for_testing(int32_t phase,
+                                                                int32_t direction) {
+    CGEventRef event = iss_create_macos27_dock_swipe_event((CGSGesturePhase)phase,
+                                                             (ISSDirection)direction);
+    if (!event) return NULL;
+    CGEventRef augmentedEvent = iss_augment_dock_swipe_event(event);
+    CFRelease(event);
+    if (!augmentedEvent) return NULL;
+
+    CFDataRef data = CGEventCreateData(kCFAllocatorDefault, augmentedEvent);
+    CFRelease(augmentedEvent);
+    return data;
+}
+
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
+    if (iss_requires_event_augmentation()) {
+        return iss_perform_macos27_switch_gesture(direction);
+    }
+
     // Send three gesture events--began, changed, and ended
     // If we only send two then mission control doesn't work.
     return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, velocity)
@@ -562,6 +835,7 @@ bool iss_init(void) {
 }
 
 void iss_destroy(void) {
+    syntheticEventsToPassThrough = 0;
     if (predictionsDict) {
         CFRelease(predictionsDict);
         predictionsDict = NULL;
@@ -597,7 +871,9 @@ bool iss_get_menubar_space_info(ISSSpaceInfo *info) {
 }
 
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction) {
-    if (iss_should_block_switch(info, direction)) {
+    // CGS space state can lag behind Dock after a macOS 27 synthetic switch.
+    // Let Dock resolve boundary attempts on that path.
+    if (!iss_requires_event_augmentation() && iss_should_block_switch(info, direction)) {
         return false;
     }
     if (!iss_perform_switch_gesture(direction, gestureSpeed)) {
@@ -610,6 +886,7 @@ static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection directio
 bool iss_switch(ISSDirection direction) {
     ISSSpaceInfo info;
     if (iss_get_space_info(&info)) {
+        const bool canMove = !iss_should_block_switch(&info, direction);
         unsigned int predicted;
         unsigned int current = get_prediction(info.displayID, &predicted) ? predicted : info.currentIndex;
         unsigned int target = direction == ISSDirectionLeft ? current - 1 : current + 1;
@@ -617,8 +894,10 @@ bool iss_switch(ISSDirection direction) {
         if (!iss_switch_with_info(&info, direction)) {
             return false;
         }
-        set_prediction(info.displayID, target);
-        if (switchCallback) { switchCallback(target); }
+        if (canMove) {
+            set_prediction(info.displayID, target);
+            if (switchCallback) { switchCallback(target); }
+        }
         return true;
     }
 
