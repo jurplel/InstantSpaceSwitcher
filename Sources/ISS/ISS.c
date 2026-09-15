@@ -162,7 +162,6 @@ static bool load_space_info_for_display(ISSSpaceInfo *info, bool useCursorDispla
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity);
 static bool iss_switch_with_info(const ISSSpaceInfo *info, ISSDirection direction);
 static bool iss_should_block_switch(const ISSSpaceInfo *info, ISSDirection direction);
-static bool iss_is_mission_control_visible(void);
 
 bool iss_requires_event_augmentation_for_version(const char *version) {
     if (!version) return false;
@@ -308,14 +307,6 @@ static void swipe_override_switch(ISSDirection dir) {
     }
 }
 
-// Keep Dock's original gesture while its overview UIs are visible. Mission
-// Control owns the dragged-window state, which synthetic space changes cannot
-// carry across desktops.
-bool iss_should_override_hardware_dock_swipe(bool exposeActive,
-                                             bool missionControlActive) {
-    return !exposeActive && !missionControlActive;
-}
-
 static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
                                    CGEventRef event, void *refcon) {
     (void)proxy;
@@ -359,10 +350,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
 
         switch (phase) {
         case kCGSGesturePhaseBegan:
-            if (!iss_should_override_hardware_dock_swipe(iss_is_expose_active(),
-                                                          iss_is_mission_control_visible())) {
-                return event;
-            }
+            if (iss_is_expose_active()) return event;
             swipeTracking = true;
             swipeFired = false;
             return NULL;
@@ -809,15 +797,6 @@ bool iss_is_mission_control_active(void) {
     return result;
 }
 
-static bool iss_is_mission_control_visible(void) {
-    CFArrayRef windowList = CGWindowListCopyWindowInfo(
-        kCGWindowListOptionOnScreenOnly, kCGNullWindowID);
-    if (!windowList) return false;
-    bool result = iss_is_mission_control_detected_in_window_list(windowList);
-    CFRelease(windowList);
-    return result;
-}
-
 void iss_set_overlay_detection_enabled(bool enabled) {
     overlayDetectionEnabled = enabled;
 }
@@ -970,28 +949,6 @@ void iss_set_swipe_override(bool enabled) {
 
 void iss_set_gesture_speed(double speed) {
     gestureSpeed = speed;
-}
-
-bool iss_toggle_mission_control(void) {
-    typedef int (*CoreDockSendNotificationFn)(CFStringRef, int);
-    static CoreDockSendNotificationFn sendNotification = NULL;
-    static bool lookedUp = false;
-    if (!lookedUp) {
-        lookedUp = true;
-        sendNotification = (CoreDockSendNotificationFn)dlsym(
-            RTLD_DEFAULT, "CoreDockSendNotification");
-        if (!sendNotification) {
-            void *hiServices = dlopen(
-                "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/Frameworks/HIServices.framework/Versions/A/HIServices",
-                RTLD_LAZY);
-            if (hiServices) {
-                sendNotification = (CoreDockSendNotificationFn)dlsym(
-                    hiServices, "CoreDockSendNotification");
-            }
-        }
-    }
-    if (!sendNotification) return false;
-    return sendNotification(CFSTR("com.apple.expose.awake"), 0) == 0;
 }
 
 void iss_reset_predictions(void) {

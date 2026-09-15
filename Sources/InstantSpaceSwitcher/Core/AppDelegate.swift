@@ -7,7 +7,6 @@ import ISS
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let menuBarController = MenuBarController()
   private let hotkeyStore = HotkeyStore.shared
-  private let windowSpaceMover = WindowSpaceMover()
   private lazy var preferencesWindowController = PreferencesWindowController()
   private var currentSpaceIndex: UInt32?
   private var lastSpaceIndex: UInt32?
@@ -219,12 +218,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     hotkeyStore.$spaceLastSpaceHotkey.receive(on: RunLoop.main).sink { [weak self] in
       self?.registerHotkey(for: .lastSpace, combination: $0)
     }.store(in: &cancellables)
-    hotkeyStore.$moveWindowHotkeys.receive(on: RunLoop.main).sink { [weak self] hotkeys in
-      guard let self else { return }
-      for (identifier, combination) in hotkeys {
-        self.registerHotkey(for: identifier, combination: combination)
-      }
-    }.store(in: &cancellables)
 
     hotkeyStore.$enabledStates.receive(on: RunLoop.main).sink { [weak self] _ in
       guard let self = self else { return }
@@ -246,7 +239,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func registerHotkey(for identifier: HotkeyIdentifier, combination: HotkeyCombination) {
     menuBarController.applyHotkey(combination, to: identifier)
 
-    guard hotkeyStore.isEnabled(identifier), combination.isValid else {
+    guard hotkeyStore.isEnabled(identifier) else {
       HotKeyManager.shared.unregister(identifier: identifier)
       return
     }
@@ -280,12 +273,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.performSpaceSwitchToIndex(9)
       case .lastSpace:
         self.performSpaceLastSpace()
-      case .moveWindowSpace1, .moveWindowSpace2, .moveWindowSpace3, .moveWindowSpace4, .moveWindowSpace5,
-           .moveWindowSpace6, .moveWindowSpace7, .moveWindowSpace8, .moveWindowSpace9, .moveWindowSpace10:
-        guard let targetIndex = identifier.moveWindowSpaceIndex else { return }
-        self.windowSpaceMover.moveActiveWindow(to: targetIndex) { success in
-          if !success { NSSound.beep() }
-        }
       }
     }
   }

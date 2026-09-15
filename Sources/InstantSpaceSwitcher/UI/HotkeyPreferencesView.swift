@@ -283,9 +283,6 @@ final class HotkeyPreferencesView: NSView {
       store.update(.defaultForSpace(10), for: .space10)
     case .lastSpace:
       store.update(.defaultLastSpace, for: .lastSpace)
-    case .moveWindowSpace1, .moveWindowSpace2, .moveWindowSpace3, .moveWindowSpace4, .moveWindowSpace5,
-         .moveWindowSpace6, .moveWindowSpace7, .moveWindowSpace8, .moveWindowSpace9, .moveWindowSpace10:
-      store.update(.unbound, for: identifier)
     }
     setStatus("Reset \(identifier.displayName) shortcut.", color: .labelColor)
   }

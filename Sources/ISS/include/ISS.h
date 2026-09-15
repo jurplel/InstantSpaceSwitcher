@@ -118,11 +118,4 @@ void iss_set_overlay_detection_enabled(bool enabled);
  */
 void iss_set_gesture_speed(double speed);
 
-/**
- * @brief Toggles Mission Control through Dock's private notification channel.
- * Call only when the requested visibility differs from current visibility.
- * @return true if Dock accepted the request.
- */
-bool iss_toggle_mission_control(void);
-
 #endif /* _ISS_H */
