@@ -73,16 +73,16 @@ bool iss_switch_to_index(unsigned int targetIndex);
 void iss_set_swipe_override(bool enabled);
 
 /**
- * @brief Callback invoked after any successful space switch.
- * @param newSpaceIndex Zero-based index of the space that was switched to.
+ * @brief Callback invoked when an intercepted trackpad swipe requests a switch.
+ * @param direction The requested adjacent-space direction.
  */
-typedef void (*ISSSwitchCallback)(unsigned int newSpaceIndex);
+typedef void (*ISSSwipeCallback)(ISSDirection direction);
 
 /**
- * @brief Registers a callback invoked after each successful space switch.
+ * @brief Registers a callback for intercepted trackpad swipe requests.
  * @param callback Function pointer, or NULL to clear.
  */
-void iss_set_switch_callback(ISSSwitchCallback callback);
+void iss_set_swipe_callback(ISSSwipeCallback callback);
 
 /**
  * @brief Resets the predicted space indices so the next bounds check falls back

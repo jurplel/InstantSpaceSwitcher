@@ -18,9 +18,13 @@ let package = Package(
                 .linkedFramework("IOKit")
             ]
         ),
+        .target(
+            name: "SpaceTransition",
+            dependencies: []
+        ),
         .executableTarget(
             name: "InstantSpaceSwitcher",
-            dependencies: ["ISS"]
+            dependencies: ["ISS", "SpaceTransition"]
         ),
         .executableTarget(
             name: "ISSCli",
@@ -29,7 +33,7 @@ let package = Package(
         ),
         .testTarget(
             name: "ISSTests",
-            dependencies: ["ISS"]
+            dependencies: ["ISS", "SpaceTransition"]
         )
     ]
 )
