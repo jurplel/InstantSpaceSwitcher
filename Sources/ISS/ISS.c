@@ -1,4 +1,5 @@
 #include "include/ISS.h"
+#include "event_serialize.h"
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -6,6 +7,8 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <float.h>
+#include <mach/mach_time.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,9 +18,14 @@ static const CGEventField kCGSEventTypeField = (CGEventField)55;
 static const CGEventField kCGEventGestureHIDType = (CGEventField)110;
 static const CGEventField kCGEventGestureSwipeMotion = (CGEventField)123;
 static const CGEventField kCGEventGestureSwipeProgress = (CGEventField)124;
+static const CGEventField kCGEventGestureSwipePositionX = (CGEventField)125;
 static const CGEventField kCGEventGestureSwipeVelocityX = (CGEventField)129;
 static const CGEventField kCGEventGestureSwipeVelocityY = (CGEventField)130;
 static const CGEventField kCGEventGesturePhase = (CGEventField)132;
+static const CGEventField kCGEventGesturePhaseAlias = (CGEventField)134;
+static const CGEventField kCGEventGestureFlavor = (CGEventField)138;
+static const CGEventField kCGEventGestureTimestamp = (CGEventField)169;
+static const int64_t kISSSyntheticGestureMarker = 0x495353;
 
 // See IOHIDEventType enum in IOHIDFamily
 static const uint32_t kIOHIDEventTypeDockSwipe = 23;
@@ -121,6 +129,9 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
     }
 
     if (!swipeOverrideEnabled) return event;
+    if (CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kISSSyntheticGestureMarker) {
+        return event;
+    }
 
     CGSEventType eventType =
         (CGSEventType)CGEventGetIntegerValueField(event, kCGSEventTypeField);
@@ -407,36 +418,79 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
     return !iss_should_block_switch(&info, direction);
 }
 
-static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
-    const bool isRight = (direction == ISSDirectionRight);
-    // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant.
-    const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
-
-    // Velocity of gesture based on speed setting
-    const double vel = isRight ? velocity : -velocity;
+CGEventRef iss_create_dock_swipe_event(int phase, ISSDirection direction,
+                                     double velocity, bool augmented, bool inverted) {
+    if (!isfinite(velocity) || velocity <= 0 ||
+        (direction != ISSDirectionLeft && direction != ISSDirectionRight) ||
+        (phase != kCGSGesturePhaseBegan && phase != kCGSGesturePhaseChanged &&
+         phase != kCGSGesturePhaseEnded)) {
+        return NULL;
+    }
+    double sign = direction == ISSDirectionRight ? 1.0 : -1.0;
+    if (augmented && inverted) sign = -sign;
+    const double progress = sign * (augmented
+        ? (phase == kCGSGesturePhaseBegan ? 0.000016 : 1.0)
+        : (double)FLT_TRUE_MIN);
+    const double vel = sign * velocity;
 
     CGEventRef ev = CGEventCreate(NULL);
     if (!ev) {
-        return false;
+        return NULL;
     }
     CGEventSetIntegerValueField(ev, kCGSEventTypeField, kCGSEventDockControl);
     CGEventSetIntegerValueField(ev, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
     CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress, progress);
     CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
-    CGEventPost(kCGSessionEventTap, ev);
-    CFRelease(ev);
-    return true;
+
+    if (augmented) {
+        CGEventSetIntegerValueField(ev, kCGEventGesturePhaseAlias, phase);
+        CGEventSetDoubleValueField(ev, kCGEventGestureFlavor, 3.0);
+        CGEventSetDoubleValueField(ev, kCGEventGestureTimestamp,
+                                    (double)mach_absolute_time());
+        CGEventSetDoubleValueField(ev, kCGEventGestureSwipePositionX, 0.1);
+
+        // Match FasterSwiper: only the Ended event carries velocity.
+        if (phase == kCGSGesturePhaseEnded) {
+            CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
+        }
+
+        CGEventRef rebuilt = iss_augment_dock_swipe_event(ev);
+        CFRelease(ev);
+        ev = rebuilt;
+        if (!ev) return NULL;
+    } else {
+        CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
+        CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
+    }
+    // Serialization can discard source metadata. Mark only the final event.
+    CGEventSetIntegerValueField(ev, kCGEventSourceUserData, kISSSyntheticGestureMarker);
+    return ev;
 }
 
 static bool iss_perform_switch_gesture(ISSDirection direction, double velocity) {
-    // Send three gesture events--began, changed, and ended
-    // If we only send two then mission control doesn't work.
-    return iss_post_dock_swipe(kCGSGesturePhaseBegan,   direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseChanged, direction, velocity)
-        && iss_post_dock_swipe(kCGSGesturePhaseEnded,   direction, velocity);
+    const bool augmented = iss_requires_event_augmentation();
+    const bool inverted = augmented && iss_requires_inverted_swipe();
+    const int phases[] = {kCGSGesturePhaseBegan, kCGSGesturePhaseChanged, kCGSGesturePhaseEnded};
+    CGEventRef events[3] = {NULL, NULL, NULL};
+    bool success = true;
+    // Build the whole sequence before posting so a failed allocation cannot leave Dock mid-gesture.
+    for (int i = 0; i < 3; i++) {
+        events[i] = iss_create_dock_swipe_event(phases[i], direction, velocity, augmented, inverted);
+        if (!events[i]) {
+            success = false;
+            break;
+        }
+    }
+    if (success) {
+        for (int i = 0; i < 3; i++) CGEventPost(kCGSessionEventTap, events[i]);
+    } else {
+        fprintf(stderr, "ISS: could not construct Dock swipe events (augmented=%d)\n", augmented);
+    }
+    for (int i = 0; i < 3; i++) {
+        if (events[i]) CFRelease(events[i]);
+    }
+    return success;
 }
 
 /** @brief Walks a CGWindowListCopyWindowInfo result
