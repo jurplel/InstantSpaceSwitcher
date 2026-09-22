@@ -1,15 +1,17 @@
 #include "include/ISS.h"
 
-#include <ApplicationServices/ApplicationServices.h>
-#include <CoreFoundation/CoreFoundation.h>
-#include <CoreGraphics/CGEventTypes.h>
-#include <assert.h>
-#include <dlfcn.h>
-#include <float.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
+#import <ApplicationServices/ApplicationServices.h>
+#import <CoreFoundation/CoreFoundation.h>
+#import <CoreGraphics/CGEventTypes.h>
+#import <Foundation/Foundation.h>
+#import <assert.h>
+#import <dlfcn.h>
+#import <float.h>
+#import <mach/mach_time.h>
+#import <stdbool.h>
+#import <stdio.h>
+#import <string.h>
+#import <unistd.h>
 
 static const CGEventField kCGSEventTypeField = (CGEventField)55;
 static const CGEventField kCGEventGestureHIDType = (CGEventField)110;
@@ -20,7 +22,47 @@ static const CGEventField kCGEventGestureSwipeVelocityY = (CGEventField)130;
 static const CGEventField kCGEventGesturePhase = (CGEventField)132;
 
 // See IOHIDEventType enum in IOHIDFamily
+static const uint32_t kIOHIDEventTypeVelocity = 9;
 static const uint32_t kIOHIDEventTypeDockSwipe = 23;
+static const uint32_t kIOHIDGestureFlavorDockPrimary = 3;
+
+#define kIOHIDFieldBase(type) ((uint32_t)(type) << 16)
+static const uint32_t kIOHIDFieldVelocityX = kIOHIDFieldBase(kIOHIDEventTypeVelocity) | 0;
+static const uint32_t kIOHIDFieldVelocityY = kIOHIDFieldBase(kIOHIDEventTypeVelocity) | 1;
+static const uint32_t kIOHIDFieldVelocityZ = kIOHIDFieldBase(kIOHIDEventTypeVelocity) | 2;
+static const uint32_t kIOHIDFieldDockSwipeMotion = kIOHIDFieldBase(kIOHIDEventTypeDockSwipe) | 1;
+static const uint32_t kIOHIDFieldDockSwipeProgress = kIOHIDFieldBase(kIOHIDEventTypeDockSwipe) | 2;
+static const uint32_t kIOHIDFieldDockSwipeFlavor = kIOHIDFieldBase(kIOHIDEventTypeDockSwipe) | 5;
+
+@interface NSObject (ISSHIDEvent)
+- (nullable instancetype)initWithType:(uint32_t)type
+                            timestamp:(uint64_t)timestamp
+                             senderID:(uint64_t)senderID;
+- (void)setOptions:(uint32_t)options;
+- (void)setIntegerValue:(int64_t)value forField:(uint32_t)field;
+- (void)setDoubleValue:(double)value forField:(uint32_t)field;
+- (void)appendEvent:(id)event;
+@end
+
+typedef void (*SLEventSetIOHIDEventFn)(CGEventRef event, CFTypeRef hidEvent);
+static SLEventSetIOHIDEventFn gSetIOHIDEvent = NULL;
+static Class gHIDEventClass = Nil;
+
+static bool iss_is_macos27_or_later(void) {
+    return [[NSProcessInfo processInfo] operatingSystemVersion].majorVersion >= 27;
+}
+
+static void iss_load_skylight_hid_api(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        void *handle = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
+                              RTLD_NOW | RTLD_LOCAL);
+        if (handle) {
+            gSetIOHIDEvent = (SLEventSetIOHIDEventFn)dlsym(handle, "SLEventSetIOHIDEvent");
+        }
+        gHIDEventClass = NSClassFromString(@"HIDEvent");
+    });
+}
 
 typedef uint32_t CGSEventType;
 enum {
@@ -424,16 +466,40 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction) {
 
 static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
     const bool isRight = (direction == ISSDirectionRight);
-    // Empirically, ±FLT_TRUE_MIN used in this way makes switching instant.
-    const double progress = isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN;
+    const bool isMacOS27 = iss_is_macos27_or_later();
 
-    // Velocity of gesture based on speed setting
-    const double vel = isRight ? velocity : -velocity;
+    if (isMacOS27) {
+        iss_load_skylight_hid_api();
+    }
+
+    // On macOS 27+, the native HID dock swipe coordinates are inverted:
+    // Moving to the next space (Right) uses negative progress and velocity.
+    // Furthermore, progress is stored in 16.16 fixed-point, so FLT_TRUE_MIN
+    // truncates to 0; using ±0.001 keeps the switch active without snapping back.
+    //
+    // NOTE / KNOWN ISSUE (macOS 27):
+    // Synthetic dock swipe events are now accepted by WindowServer's indirectGestureProcessor
+    // thanks to the attached IOHIDEvent payload. However, the space switch transition
+    // is not completely instantaneous yet: despite high velocity (±1000000.0) and small
+    // progress delta (±0.001), WindowServer still renders a brief sliding transition animation
+    // instead of a zero-frame warp. This indicates macOS 27 clamps gesture exit velocity
+    // or enforces a minimum spring duration in its compositor. Recorded for future investigation.
+    const double progress = isMacOS27
+        ? (isRight ? -0.001 : 0.001)
+        : (isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN);
+
+    const double vel = isMacOS27
+        ? (isRight ? -velocity : velocity)
+        : (isRight ? velocity : -velocity);
 
     CGEventRef ev = CGEventCreate(NULL);
     if (!ev) {
         return false;
     }
+
+    const uint64_t ts = mach_absolute_time();
+    CGEventSetType(ev, (CGEventType)kCGSEventDockControl);
+    CGEventSetTimestamp(ev, ts);
     CGEventSetIntegerValueField(ev, kCGSEventTypeField, kCGSEventDockControl);
     CGEventSetIntegerValueField(ev, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
     CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
@@ -441,6 +507,33 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
+
+    // Attach required IOHIDEvent payload on macOS 27+
+    if (isMacOS27 && gSetIOHIDEvent && gHIDEventClass) {
+        id hidEvent = [[gHIDEventClass alloc] initWithType:kIOHIDEventTypeDockSwipe
+                                                 timestamp:ts
+                                                  senderID:0];
+        if (hidEvent) {
+            [hidEvent setOptions:((uint32_t)phase << 24)];
+            [hidEvent setIntegerValue:kCGGestureMotionHorizontal forField:kIOHIDFieldDockSwipeMotion];
+            [hidEvent setIntegerValue:kIOHIDGestureFlavorDockPrimary forField:kIOHIDFieldDockSwipeFlavor];
+            [hidEvent setDoubleValue:progress forField:kIOHIDFieldDockSwipeProgress];
+
+            if (phase == kCGSGesturePhaseEnded || phase == kCGSGesturePhaseCancelled) {
+                id velEvent = [[gHIDEventClass alloc] initWithType:kIOHIDEventTypeVelocity
+                                                         timestamp:ts
+                                                          senderID:0];
+                if (velEvent) {
+                    [velEvent setDoubleValue:vel forField:kIOHIDFieldVelocityX];
+                    [velEvent setDoubleValue:vel forField:kIOHIDFieldVelocityY];
+                    [velEvent setDoubleValue:0.0 forField:kIOHIDFieldVelocityZ];
+                    [hidEvent appendEvent:velEvent];
+                }
+            }
+            gSetIOHIDEvent(ev, (__bridge CFTypeRef)hidEvent);
+        }
+    }
+
     CGEventPost(kCGSessionEventTap, ev);
     CFRelease(ev);
     return true;
@@ -532,17 +625,12 @@ void iss_set_overlay_detection_enabled(bool enabled) {
     overlayDetectionEnabled = enabled;
 }
 
-bool iss_init(void) {
+static bool iss_install_event_tap(void) {
     if (globalTap) {
         return true;
     }
 
-    if (!predictionsDict) {
-        predictionsDict = CFDictionaryCreateMutable(NULL, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    }
-
-    CGEventMask mask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp)
-        | (1ULL << kCGSEventGesture) | (1ULL << kCGSEventDockControl);
+    CGEventMask mask = (1ULL << kCGSEventGesture) | (1ULL << kCGSEventDockControl);
     globalTap = CGEventTapCreate(
         kCGSessionEventTap,
         kCGHeadInsertEventTap,
@@ -568,11 +656,7 @@ bool iss_init(void) {
     return true;
 }
 
-void iss_destroy(void) {
-    if (predictionsDict) {
-        CFRelease(predictionsDict);
-        predictionsDict = NULL;
-    }
+static void iss_remove_event_tap(void) {
     if (globalTap) {
         CGEventTapEnable(globalTap, false);
         if (globalSource) {
@@ -582,6 +666,30 @@ void iss_destroy(void) {
         }
         CFRelease(globalTap);
         globalTap = NULL;
+    }
+}
+
+bool iss_init(void) {
+    if (iss_is_macos27_or_later()) {
+        iss_load_skylight_hid_api();
+    }
+
+    if (!predictionsDict) {
+        predictionsDict = CFDictionaryCreateMutable(NULL, 0, &kCFCopyStringDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    }
+
+    if (swipeOverrideEnabled) {
+        return iss_install_event_tap();
+    }
+
+    return true;
+}
+
+void iss_destroy(void) {
+    iss_remove_event_tap();
+    if (predictionsDict) {
+        CFRelease(predictionsDict);
+        predictionsDict = NULL;
     }
 }
 
@@ -671,7 +779,10 @@ bool iss_switch_to_index(unsigned int targetIndex) {
 
 void iss_set_swipe_override(bool enabled) {
     swipeOverrideEnabled = enabled;
-    if (!enabled) {
+    if (enabled) {
+        iss_install_event_tap();
+    } else {
+        iss_remove_event_tap();
         swipeTracking = false;
         swipeFired = false;
     }

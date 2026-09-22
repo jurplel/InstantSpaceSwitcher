@@ -58,6 +58,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    usleep(50000);
     iss_destroy();
     return 0;
 }
