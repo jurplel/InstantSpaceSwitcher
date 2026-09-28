@@ -3,7 +3,10 @@
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <mach/mach_time.h>
+#include <math.h>
+#include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/sysctl.h>
@@ -46,16 +49,42 @@ typedef struct {
 
 #pragma pack(pop)
 
+_Static_assert(sizeof(IOHIDEventBase) == 16, "unexpected IOHID base layout");
+_Static_assert(sizeof(IOHIDFluidTouchGestureData) == 40, "unexpected swipe layout");
+_Static_assert(sizeof(IOHIDVelocityEventData) == 28, "unexpected velocity layout");
+_Static_assert(sizeof(IOHIDSystemQueueElementHeader) == 28, "unexpected queue layout");
+_Static_assert(offsetof(IOHIDFluidTouchGestureData, swipe_progress) == 36,
+               "unexpected progress offset");
+
+// Mark after CGEventCreateFromData, which discards eventSourceUserData.
+// This identifies ISS events even when a tap observes sourcePid == 0.
+static const int64_t kISSSyntheticEventMarker = INT64_C(0x4953537769706531);
+
+void iss_mark_synthetic_event(CGEventRef event) {
+    if (event) CGEventSetIntegerValueField(event, kCGEventSourceUserData, kISSSyntheticEventMarker);
+}
+
+bool iss_is_synthetic_event(CGEventRef event) {
+    return event && CGEventGetIntegerValueField(event, kCGEventSourceUserData) == kISSSyntheticEventMarker;
+}
+
 static const uint32_t kIOHIDEventTypeVelocity = 9;
 static const uint32_t kIOHIDEventTypeFluidTouchGesture = 23;
 static const uint16_t kIOHIDGestureFlavorDockPrimary = 3;
 
-static int32_t iss_double_to_fixed1616(double val) {
-    int32_t fixed = (int32_t)(val * 65536.0);
-    if (fixed == 0 && val != 0.0) {
-        return val > 0.0 ? 1 : -1;
+bool iss_double_to_fixed1616(double value, int32_t *result) {
+    if (!result || !isfinite(value)) return false;
+    // Check before multiplication and conversion. A cast outside int32_t's
+    // range is undefined in C, including finite velocities from large jumps.
+    if (value >= (double)INT32_MAX / 65536.0) {
+        *result = INT32_MAX;
+    } else if (value <= (double)INT32_MIN / 65536.0) {
+        *result = INT32_MIN;
+    } else {
+        *result = (int32_t)(value * 65536.0);
+        if (*result == 0 && value != 0.0) *result = value > 0.0 ? 1 : -1;
     }
-    return fixed;
+    return true;
 }
 
 static uint8_t *iss_generate_iohid_payload(CGEventRef event, size_t *out_length) {
@@ -67,6 +96,13 @@ static uint8_t *iss_generate_iohid_payload(CGEventRef event, size_t *out_length)
     double vel_x = CGEventGetDoubleValueField(event, (CGEventField)129);
     double vel_y = CGEventGetDoubleValueField(event, (CGEventField)130);
     int64_t swipe_mask = CGEventGetIntegerValueField(event, (CGEventField)115);
+
+    int32_t fixed_progress, fixed_pos_x, fixed_pos_y, fixed_vel_x, fixed_vel_y;
+    if (!iss_double_to_fixed1616(progress, &fixed_progress) ||
+        !iss_double_to_fixed1616(pos_x, &fixed_pos_x) ||
+        !iss_double_to_fixed1616(pos_y, &fixed_pos_y) ||
+        !iss_double_to_fixed1616(vel_x, &fixed_vel_x) ||
+        !iss_double_to_fixed1616(vel_y, &fixed_vel_y)) return NULL;
 
     bool include_velocity = (vel_x != 0.0 || vel_y != 0.0 || phase == 4);
     uint32_t event_count = include_velocity ? 2 : 1;
@@ -97,13 +133,13 @@ static uint8_t *iss_generate_iohid_payload(CGEventRef event, size_t *out_length)
     fluid->base.type = kIOHIDEventTypeFluidTouchGesture;
     fluid->base.options = (uint32_t)((phase & 0xFF) << 24);
     fluid->base.depth = 0;
-    fluid->position_x = iss_double_to_fixed1616(pos_x);
-    fluid->position_y = iss_double_to_fixed1616(pos_y);
+    fluid->position_x = fixed_pos_x;
+    fluid->position_y = fixed_pos_y;
     fluid->position_z = 0;
     fluid->swipe_mask = (uint32_t)swipe_mask;
     fluid->gesture_motion = (uint16_t)motion;
     fluid->gesture_flavor = kIOHIDGestureFlavorDockPrimary;
-    fluid->swipe_progress = iss_double_to_fixed1616(progress);
+    fluid->swipe_progress = fixed_progress;
 
     if (include_velocity) {
         IOHIDVelocityEventData *velocity = (IOHIDVelocityEventData *)(payload + sizeof(IOHIDSystemQueueElementHeader) + sizeof(IOHIDFluidTouchGestureData));
@@ -111,8 +147,8 @@ static uint8_t *iss_generate_iohid_payload(CGEventRef event, size_t *out_length)
         velocity->base.type = kIOHIDEventTypeVelocity;
         velocity->base.options = 0;
         velocity->base.depth = 1;
-        velocity->velocity_x = iss_double_to_fixed1616(vel_x);
-        velocity->velocity_y = iss_double_to_fixed1616(vel_y);
+        velocity->velocity_x = fixed_vel_x;
+        velocity->velocity_y = fixed_vel_y;
         velocity->velocity_z = 0;
     }
 
@@ -120,66 +156,64 @@ static uint8_t *iss_generate_iohid_payload(CGEventRef event, size_t *out_length)
     return payload;
 }
 
-CGEventRef iss_augment_dock_swipe_event(CGEventRef event) {
-    if (!event) {
-        return NULL;
-    }
+CFDataRef iss_copy_dock_swipe_data(CGEventRef event, CFDataRef serialized) {
+    if (!event || !serialized) return NULL;
+    const uint8_t *bytes = CFDataGetBytePtr(serialized);
+    const CFIndex length = CFDataGetLength(serialized);
+    if (length < 4 || memcmp(bytes, "\0\0\0\2", 4) != 0) return NULL;
 
-    CFDataRef data = CGEventCreateData(kCFAllocatorDefault, event);
-    if (!data) {
-        return NULL;
-    }
+    CFMutableDataRef result = CFDataCreateMutable(NULL, 0);
+    if (!result) return NULL;
+    CFDataAppendBytes(result, bytes, 4);
 
-    const uint8_t *bytes = CFDataGetBytePtr(data);
-    CFIndex length = CFDataGetLength(data);
-
-    // Verify format version 2 (first 4 bytes: 00 00 00 02)
-    if (length < 4 || bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 0 || bytes[3] != 2) {
-        CFRelease(data);
-        return NULL;
+    // Format 2 uses big-endian tags. Type 0 holds either one 64-bit
+    // integer or a byte block padded to four bytes; types 1 and 3 hold
+    // four-byte words. Type 2 is reserved. Validate before copying.
+    for (CFIndex offset = 4; offset < length;) {
+        if (length - offset < 4) goto invalid;
+        const uint16_t count = ((uint16_t)bytes[offset] << 8) | bytes[offset + 1];
+        const uint16_t tag = ((uint16_t)bytes[offset + 2] << 8) | bytes[offset + 3];
+        const unsigned type = tag >> 14;
+        if (count == 0 || type == 2) goto invalid;
+        const CFIndex size = type == 0
+            ? (count == 1 ? 8 : ((CFIndex)count + 3) & ~3)
+            : (CFIndex)count * 4;
+        if (size > length - offset - 4) goto invalid;
+        // Replace an existing payload instead of appending a duplicate.
+        // This also permits rebuilding a consumed hardware terminal event.
+        if ((tag & 0x3fff) != 4205) {
+            CFDataAppendBytes(result, bytes + offset, 4 + size);
+        }
+        offset += 4 + size;
     }
 
     size_t payload_length = 0;
     uint8_t *payload = iss_generate_iohid_payload(event, &payload_length);
     if (!payload) {
-        CFRelease(data);
-        return NULL;
+        goto invalid;
     }
-
-    // Allocate buffer for original data + 4-byte Tag + payload
-    size_t new_length = (size_t)length + 4 + payload_length;
-    uint8_t *new_bytes = (uint8_t *)malloc(new_length);
-    if (!new_bytes) {
-        free(payload);
-        CFRelease(data);
-        return NULL;
-    }
-
-    // Copy original event data
-    memcpy(new_bytes, bytes, length);
-
-    // Append 4-byte Tag:
-    // Word 1: Size Words (payload_length in big-endian)
-    new_bytes[length] = (uint8_t)((payload_length >> 8) & 0xFF);
-    new_bytes[length + 1] = (uint8_t)(payload_length & 0xFF);
-    // Word 2: (Type << 14) | Field ID (4205 in big-endian)
-    new_bytes[length + 2] = (uint8_t)((4205 >> 8) & 0xFF);
-    new_bytes[length + 3] = (uint8_t)(4205 & 0xFF);
-
-    // Append Payload
-    memcpy(new_bytes + length + 4, payload, payload_length);
-
+    const uint8_t tag[4] = {(uint8_t)(payload_length >> 8), (uint8_t)payload_length,
+                            (uint8_t)(4205 >> 8), (uint8_t)(4205 & 0xff)};
+    CFDataAppendBytes(result, tag, sizeof(tag));
+    CFDataAppendBytes(result, payload, (CFIndex)payload_length);
     free(payload);
+    return result;
+
+invalid:
+    CFRelease(result);
+    return NULL;
+}
+
+CGEventRef iss_augment_dock_swipe_event(CGEventRef event) {
+    if (!event) return NULL;
+    CFDataRef data = CGEventCreateData(kCFAllocatorDefault, event);
+    if (!data) return NULL;
+    CFDataRef new_data = iss_copy_dock_swipe_data(event, data);
     CFRelease(data);
-
-    CFDataRef new_data = CFDataCreate(kCFAllocatorDefault, new_bytes, (CFIndex)new_length);
-    free(new_bytes);
-    if (!new_data) {
-        return NULL;
-    }
-
+    if (!new_data) return NULL;
     CGEventRef result = CGEventCreateFromData(kCFAllocatorDefault, new_data);
     CFRelease(new_data);
+    iss_mark_synthetic_event(result);
     return result;
 }
 

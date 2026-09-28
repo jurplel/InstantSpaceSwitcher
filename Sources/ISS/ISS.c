@@ -138,6 +138,7 @@ static CGEventRef eventTapCallback(CGEventTapProxy proxy, CGEventType type,
     }
 
     if (!swipeOverrideEnabled) return event;
+    if (iss_is_synthetic_event(event)) return event;
 
     CGSEventType eventType =
         (CGSEventType)CGEventGetIntegerValueField(event, kCGSEventTypeField);
@@ -429,7 +430,7 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     // progress and velocity is inverted relative to the app's internal
     // direction model. Flip the sign for the augmented path only.
     const double progress = iss_requires_event_augmentation()
-                                ? (isRight ? -0.000016 : 0.000016)
+                                ? (isRight ? -1.0 / 65536.0 : 1.0 / 65536.0)
                                 : (isRight ? (double)FLT_TRUE_MIN : -(double)FLT_TRUE_MIN);
 
     // Velocity of gesture based on speed setting

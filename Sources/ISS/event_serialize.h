@@ -3,6 +3,14 @@
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <stdbool.h>
+#include <stdint.h>
+
+// Internal helpers shared with the construction layer and regression tests.
+// Nonfinite values fail. Finite values saturate to signed 16.16 limits.
+bool iss_double_to_fixed1616(double value, int32_t *result);
+CFDataRef iss_copy_dock_swipe_data(CGEventRef event, CFDataRef serialized);
+void iss_mark_synthetic_event(CGEventRef event);
+bool iss_is_synthetic_event(CGEventRef event);
 
 /**
  * @brief Augments a synthetic dock-swipe CGEvent with the raw IOHID payload

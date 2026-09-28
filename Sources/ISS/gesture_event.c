@@ -2,9 +2,11 @@
 #include "event_serialize.h"
 
 #include <mach/mach_time.h>
+#include <math.h>
 
 CGEventRef iss_create_dock_swipe_event(uint8_t phase, double progress,
                                       double velocity, bool augment) {
+    if (!isfinite(progress) || !isfinite(velocity)) return NULL;
     CGEventRef event = CGEventCreate(NULL);
     if (!event) return NULL;
 
@@ -30,5 +32,6 @@ CGEventRef iss_create_dock_swipe_event(uint8_t phase, double progress,
 
     CGEventSetDoubleValueField(event, (CGEventField)129, velocity);
     CGEventSetDoubleValueField(event, (CGEventField)130, velocity);
+    iss_mark_synthetic_event(event);
     return event;
 }
