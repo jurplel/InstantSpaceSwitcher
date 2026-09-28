@@ -29,7 +29,12 @@ let package = Package(
         ),
         .testTarget(
             name: "ISSTests",
-            dependencies: ["ISS"]
+            dependencies: ["ISS", "ISSInternalTestSupport"]
+        ),
+        .target(
+            name: "ISSInternalTestSupport",
+            dependencies: ["ISS"],
+            path: "Tests/ISSInternalTestSupport"
         )
     ]
 )

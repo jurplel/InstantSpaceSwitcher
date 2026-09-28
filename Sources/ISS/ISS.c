@@ -1,5 +1,6 @@
 #include "include/ISS.h"
 #include "event_serialize.h"
+#include "gesture_event.h"
 
 #include <ApplicationServices/ApplicationServices.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -7,7 +8,6 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <float.h>
-#include <mach/mach_time.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,13 +17,9 @@ static const CGEventField kCGSEventTypeField = (CGEventField)55;
 static const CGEventField kCGEventGestureHIDType = (CGEventField)110;
 static const CGEventField kCGEventGestureSwipeMotion = (CGEventField)123;
 static const CGEventField kCGEventGestureSwipeProgress = (CGEventField)124;
-static const CGEventField kCGEventGestureSwipePositionX = (CGEventField)125;
 static const CGEventField kCGEventGestureSwipeVelocityX = (CGEventField)129;
 static const CGEventField kCGEventGestureSwipeVelocityY = (CGEventField)130;
 static const CGEventField kCGEventGesturePhase = (CGEventField)132;
-static const CGEventField kCGEventGesturePhaseAlias = (CGEventField)134;
-static const CGEventField kCGEventGestureZoomDeltaY = (CGEventField)138;
-static const CGEventField kCGEventSourceUnixProcessIDAlias = (CGEventField)169;
 
 // See IOHIDEventType enum in IOHIDFamily
 static const uint32_t kIOHIDEventTypeDockSwipe = 23;
@@ -440,40 +436,12 @@ static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, d
     const double vel = isRight ? velocity : -velocity;
     const double modernVel = isRight ? -velocity : velocity;
 
-    CGEventRef ev = CGEventCreate(NULL);
+    CGEventRef ev = iss_create_dock_swipe_event(phase, progress,
+        iss_requires_event_augmentation() ? modernVel : vel,
+        iss_requires_event_augmentation());
     if (!ev) {
         return false;
     }
-    CGEventSetIntegerValueField(ev, kCGSEventTypeField, kCGSEventDockControl);
-    CGEventSetIntegerValueField(ev, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
-    CGEventSetIntegerValueField(ev, kCGEventGesturePhase, phase);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeProgress, progress);
-    CGEventSetIntegerValueField(ev, kCGEventGestureSwipeMotion, kCGGestureMotionHorizontal);
-
-    if (iss_requires_event_augmentation()) {
-        CGEventSetIntegerValueField(ev, kCGEventGesturePhaseAlias, phase);
-        CGEventSetDoubleValueField(ev, kCGEventGestureZoomDeltaY, 3.0);
-        CGEventSetDoubleValueField(ev, kCGEventSourceUnixProcessIDAlias,
-                                    (double)mach_absolute_time());
-        CGEventSetDoubleValueField(ev, kCGEventGestureSwipePositionX, 0.1);
-
-        // Match FasterSwiper: only the Ended event carries velocity.
-        if (phase == kCGSGesturePhaseEnded) {
-            CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, modernVel);
-        }
-
-        CGEventRef augmented = iss_augment_dock_swipe_event(ev);
-        CFRelease(ev);
-        if (!augmented) {
-            return false;
-        }
-        CGEventPost(kCGSessionEventTap, augmented);
-        CFRelease(augmented);
-        return true;
-    }
-
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, vel);
-    CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityY, vel);
     CGEventPost(kCGSessionEventTap, ev);
     CFRelease(ev);
     return true;
