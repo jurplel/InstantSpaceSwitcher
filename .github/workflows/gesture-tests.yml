@@ -1,0 +1,25 @@
+name: Gesture regression tests
+
+on:
+  push:
+    branches: [fix/macos27-event-hardening, fix/macos27-local-integration]
+  pull_request:
+    branches: [main, macos-27]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [macos-26, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+      - run: bash dist/test-events.sh
+      - run: bash dist/build.sh
+      - run: codesign --verify --deep --strict --verbose=2 build/InstantSpaceSwitcher.app
