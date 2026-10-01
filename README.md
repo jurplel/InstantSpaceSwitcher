@@ -2,6 +2,59 @@
 
 Native instant workspace switching on macOS. No more waiting for animations.
 
+This local build defaults to **Fast**, to keep a visible sliding transition.
+This default applies to both the app and CLI. Adjust it in the app under
+**Settings → Animation**. This tab includes a live curve graph, speed presets, a custom duration slider (**80–1000 ms**), and separate
+**Ease in** / **Ease out** sliders (**0–50%** of the slide time each).
+Curve presets are **Gentle** (the current 10%/10% curve), **Linear**, **Ease In**,
+**Ease Out**, and **Smooth**. Changes save automatically and apply to the next
+slide. **Gentle** with **Fast** uses the accepted 220 ms behavior.
+Instant disables curve controls; select another speed to edit them.
+Animated presets now drive swipe progress over a fixed interval, with constant
+speed through the middle 80% and brief easing at either end. The target durations
+are Normal **275 ms**, Fast **220 ms**, Faster **183 ms**, and Fastest **138 ms**.
+Instant retains the original immediate gesture. Saved speed preferences still apply.
+The gesture now uses a travel of **2.0**, leaves one update interval before
+release, and releases at rest. The first trial used travel 1.0 followed by a
+high-velocity finish; on macOS 26.6.2 this visibly slid only partway and then
+accelerated abruptly. Do not treat the gesture travel field as a normalized
+screen position or restore the high-velocity finish for ordinary slides.
+The revised travel and at-rest release were visually accepted on this machine;
+the travel calibration remains experimental on other macOS versions.
+The durations above describe the gesture; the Dock renders the actual animation.
+Physical trackpad gestures retain their normal behavior unless **Override swipe
+gesture** is enabled. Repeated shortcuts finish the current slide before starting
+the next; direct jumps skip intermediate slides and animate the final step.
+
+For **Control + Left/Right**, assign those shortcuts in the app's Keyboard tab
+and disable macOS's competing **Move left a space** / **Move right a space**
+shortcuts in **System Settings → Keyboard → Keyboard Shortcuts → Mission Control**.
+Otherwise the native shortcuts may retain the normal animation regardless of the
+app's speed setting. Re-enable them there if you stop using this app.
+
+Command-Tab retains the native macOS chooser. **Settings → General → Use animation
+settings when switching apps** applies the selected slide to cross-Space app
+activation, including Command-Tab and Dock clicks. It is enabled by default.
+The app observes activation, resolves the focused window's Space and display,
+and posts the existing asynchronous swipe. Keyboard input is never held or
+replayed. Window lookup runs on a background queue with a short Accessibility
+timeout; rapid selections discard stale lookups.
+Physical Space swipes and Control-arrow navigation suppress activation following
+while the desktop settles, so the new focus cannot undo a manual Space change.
+An explicit Command-Tab selection or mouse click clears that suppression.
+
+While enabled and Accessibility is granted, the app temporarily turns off
+**System Settings → Desktop & Dock → When switching to an application, switch to
+a Space with open windows** so the native jump does not race the slide. Dock
+rebuilds its own WindowServer workspace preferences from that setting; Dock is
+not restarted. The original value is recorded and restored when the option is
+disabled or the app quits; a separate helper restores it if the app crashes, and
+the next launch restores anything still left over. An earlier build set a
+partial WindowServer session preference instead, which discarded Dock's other
+workspace keys and broke the Mission Control window layout. This has been tested
+on macOS 26.6.2. The earlier approach that held and replayed Command release was
+removed because it caused sticky or unresponsive keyboard input.
+
 https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 
 ## Features
@@ -62,4 +115,3 @@ If you work at Apple, and your team owns the space switching animation, please f
 
 [^1]: This happens because the app is not signed, which requires a costly Apple Developer account
 [^2]: And I know for a fact there is a rdar for this
-

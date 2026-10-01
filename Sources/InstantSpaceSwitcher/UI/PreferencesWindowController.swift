@@ -6,7 +6,7 @@ final class PreferencesWindowController: NSWindowController {
     let tabViewController = PreferencesTabViewController()
 
     let panel = PreferencesPanel(
-      contentRect: NSRect(x: 0, y: 0, width: 550, height: 350),
+      contentRect: NSRect(x: 0, y: 0, width: 580, height: 380),
       styleMask: [.titled, .closable],
       backing: .buffered,
       defer: false

@@ -15,6 +15,10 @@ final class PreferencesTabViewController: NSTabViewController {
     shortcutsTab.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keyboard")
 
     addTabViewItem(generalTab)
+    let animationTab = NSTabViewItem(viewController: AnimationSettingsViewController())
+    animationTab.label = "Animation"
+    animationTab.image = NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Animation")
+    addTabViewItem(animationTab)
     addTabViewItem(shortcutsTab)
   }
 }

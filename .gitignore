@@ -3,3 +3,4 @@ build/
 .vscode/
 *.app
 .DS_Store
+.claude/worktrees/
