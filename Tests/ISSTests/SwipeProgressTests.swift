@@ -15,25 +15,18 @@ private let phaseEnded: UInt8 = 4
 
 final class SwipeProgressTests: XCTestCase {
 
-  /// Began must stay near zero so no intermediate frame is drawn, but
-  /// non-zero so the direction survives.
-  func testBeganIsNearZeroButSigned() {
-    let right = iss_swipe_progress_for_phase(phaseBegan, ISSDirectionRight)
-    let left = iss_swipe_progress_for_phase(phaseBegan, ISSDirectionLeft)
-    XCTAssertGreaterThan(right, 0)
-    XCTAssertLessThan(left, 0)
-    XCTAssertLessThan(abs(right), 1e-30)
-    XCTAssertLessThan(abs(left), 1e-30)
+  /// Began uses a small signed progress to minimize the visible transition.
+  func testBeganUsesSmallSignedProgress() {
+    XCTAssertEqual(iss_swipe_progress_for_phase(phaseBegan, ISSDirectionRight), 0.000016)
+    XCTAssertEqual(iss_swipe_progress_for_phase(phaseBegan, ISSDirectionLeft), -0.000016)
   }
 
-  /// Changed and Ended must carry the full travel. A commit with ~zero
-  /// progress lands on a space whose compositing surfaces WindowServer never
-  /// built, leaving every window blank until Mission Control forces a redraw.
-  func testChangedAndEndedCarryFullTravel() {
-    XCTAssertEqual(iss_swipe_progress_for_phase(phaseChanged, ISSDirectionRight), 1.0)
-    XCTAssertEqual(iss_swipe_progress_for_phase(phaseEnded, ISSDirectionRight), 1.0)
-    XCTAssertEqual(iss_swipe_progress_for_phase(phaseChanged, ISSDirectionLeft), -1.0)
-    XCTAssertEqual(iss_swipe_progress_for_phase(phaseEnded, ISSDirectionLeft), -1.0)
+  /// Changed and Ended use the same small progress while retaining direction.
+  func testChangedAndEndedUseSmallSignedProgress() {
+    for phase in [phaseChanged, phaseEnded] {
+      XCTAssertEqual(iss_swipe_progress_for_phase(phase, ISSDirectionRight), 0.000016)
+      XCTAssertEqual(iss_swipe_progress_for_phase(phase, ISSDirectionLeft), -0.000016)
+    }
   }
 
   /// All phases of one gesture must agree on direction.
