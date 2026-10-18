@@ -2,6 +2,7 @@
 #define _ISS_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <CoreFoundation/CoreFoundation.h>
 
 /** @brief Initialize resources
@@ -25,7 +26,30 @@ typedef struct {
     unsigned int currentIndex; /**< Zero-based index of the active space */
     unsigned int spaceCount;   /**< Total number of user-visible spaces */
     char displayID[128];       /**< UUID string of the display */
+    uint32_t screenID;         /**< Physical display under the cursor, or zero */
 } ISSSpaceInfo;
+
+typedef struct {
+    uint64_t spaceID;
+    char uuid[128];
+    bool isDefaultDesktop; /**< The display's only desktop without a UUID */
+} ISSSpaceIdentity;
+
+typedef struct {
+    ISSSpaceInfo display;
+    unsigned int targetIndex;
+    ISSSpaceIdentity space;
+} ISSSwitchEvent;
+
+/** @brief Copies the display/space catalog for settings and menu labels. */
+CFArrayRef iss_copy_managed_display_spaces(void) CF_RETURNS_RETAINED;
+
+/** @brief Resolves a zero-based space index in a display's Spaces array. */
+bool iss_get_space_identity(CFArrayRef spaces, unsigned int index, ISSSpaceIdentity *identity);
+
+/** @brief Reports the target and physical screen captured for a switch. */
+typedef void (*ISSSwitchEventCallback)(ISSSwitchEvent event);
+void iss_set_switch_event_callback(ISSSwitchEventCallback callback);
 
 /**
  * @brief Performs the space switch if the requested move is within bounds.

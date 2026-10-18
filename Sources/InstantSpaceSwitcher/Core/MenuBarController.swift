@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ISS
 
 @MainActor
@@ -9,6 +10,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private var spacesMenuItem: NSMenuItem?
   private var cachedSpaceInfo: ISSSpaceInfo?
   private var refreshWorkItem: DispatchWorkItem?
+  private var cancellables = Set<AnyCancellable>()
 
   private lazy var baseStatusImage: NSImage? = {
     let image = NSImage(
@@ -23,6 +25,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     statusItem.menu = createMenu()
     updateStatusItemAppearance()
+    NotificationCenter.default.publisher(for: .spaceNamesDidChange)
+      .sink { [weak self] _ in self?.updateSpacesMenuItems() }
+      .store(in: &cancellables)
+    SpaceCatalog.shared.$displays.dropFirst().receive(on: RunLoop.main)
+      .sink { [weak self] _ in self?.updateSpacesMenuItems() }
+      .store(in: &cancellables)
   }
 
   private func createMenu() -> NSMenu {
@@ -152,8 +160,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     let count = Int(info.spaceCount)
     let store = HotkeyStore.shared
+    let displayIdentifier = stringFromCStringBuffer(info.displayID)
     for index in 0..<count {
-      let title = "Space \(index + 1)"
+      let identity = SpaceCatalog.shared.identity(
+        displayIdentifier: displayIdentifier, index: UInt32(index))
+      let title = SpaceNameStore.shared.name(for: identity?.key) ?? "Space \(index + 1)"
       let item = NSMenuItem(title: title, action: #selector(switchToSpace(_:)), keyEquivalent: "")
       
       // Sync customized shortcuts
@@ -194,7 +205,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     if menu === statusItem.menu || menu === spacesMenuItem?.submenu {
-      scheduleRefresh(after: 0.05)
+      SpaceCatalog.shared.refresh()
+      delegate?.menuBarControllerDidRequestRefresh(self)
     }
   }
 

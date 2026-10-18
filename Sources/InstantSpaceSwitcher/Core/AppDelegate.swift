@@ -48,9 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       iss_set_overlay_detection_enabled(true)
     }
 
-    iss_set_switch_callback { newSpaceIndex in
+    _ = SpaceNameStore.shared
+    SpaceCatalog.shared.startObserving()
+    iss_set_switch_event_callback { event in
       DispatchQueue.main.async {
-        OSDWindow.shared.show(message: "\(newSpaceIndex + 1)")
+        OSDWindow.shared.show(
+          message: SpaceNameStore.shared.message(for: event), screenID: event.display.screenID)
       }
     }
 
@@ -69,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationWillTerminate(_ notification: Notification) {
+    iss_set_switch_event_callback(nil)
     iss_destroy()
     stopObservingSpaceChanges()
     stopObservingAppActivation()
@@ -168,6 +172,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let closeItem = NSMenuItem(
       title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
     fileMenu.addItem(closeItem)
+
+    let editMenuItem = NSMenuItem()
+    let editMenu = NSMenu(title: "Edit")
+    editMenuItem.submenu = editMenu
+    mainMenu.addItem(editMenuItem)
+
+    editMenu.addItem(NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"))
+    let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+    redoItem.keyEquivalentModifierMask = [.command, .shift]
+    editMenu.addItem(redoItem)
+    editMenu.addItem(NSMenuItem.separator())
+
+    editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+    editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+    editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+    editMenu.addItem(NSMenuItem(
+      title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+    editMenu.addItem(NSMenuItem.separator())
+
+    let emojiItem = NSMenuItem(
+      title: "Emoji & Symbols", action: #selector(NSApplication.orderFrontCharacterPalette(_:)),
+      keyEquivalent: " ")
+    emojiItem.keyEquivalentModifierMask = [.control, .command]
+    emojiItem.target = NSApp
+    editMenu.addItem(emojiItem)
 
     NSApp.mainMenu = mainMenu
   }
