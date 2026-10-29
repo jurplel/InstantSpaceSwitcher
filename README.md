@@ -12,6 +12,15 @@ https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 
 A simple CLI is provided (`InstantSpaceSwitcher.app/Contents/MacOS/ISSCli --help`)
 
+## Keyboard space-switch animation
+
+On macOS 13 and later, keyboard shortcuts can show a custom vertical transition
+between spaces. The transition uses a snapshot of the active display, so
+Screen Recording permission is needed only to show this desktop snapshot;
+protected content may be omitted from it. Without permission, space switching
+continues to work and uses the normal macOS transition instead. The app explains
+this fallback and can open Screen Recording settings. The on-screen display
+(OSD) remains independent of the desktop transition.
 
 ## Installation
 
@@ -62,4 +71,3 @@ If you work at Apple, and your team owns the space switching animation, please f
 
 [^1]: This happens because the app is not signed, which requires a costly Apple Developer account
 [^2]: And I know for a fact there is a rdar for this
-
