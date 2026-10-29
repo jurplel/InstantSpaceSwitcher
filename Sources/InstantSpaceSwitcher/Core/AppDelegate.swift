@@ -7,6 +7,8 @@ import ISS
 final class AppDelegate: NSObject, NSApplicationDelegate {
   private let menuBarController = MenuBarController()
   private let hotkeyStore = HotkeyStore.shared
+  private let spaceSwitchRequestQueue = SpaceSwitchRequestQueue()
+  private let spaceTransitionOverlay = SpaceTransitionOverlay()
   private lazy var preferencesWindowController = PreferencesWindowController()
   private var currentSpaceIndex: UInt32?
   private var lastSpaceIndex: UInt32?
@@ -275,9 +277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       guard let self else { return }
       switch identifier {
       case .left:
-        self.performSpaceSwitch(ISSDirectionLeft)
+        self.enqueueKeyboardSpaceSwitch(direction: ISSDirectionLeft)
       case .right:
-        self.performSpaceSwitch(ISSDirectionRight)
+        self.enqueueKeyboardSpaceSwitch(direction: ISSDirectionRight)
       case .space1:
         self.performSpaceSwitchToIndex(0)
       case .space2:
@@ -325,11 +327,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 
   private func performSpaceSwitchToIndex(_ index: UInt32) {
-    if !iss_switch_to_index(index) {
-      NSSound.beep()
-      return
+    spaceSwitchRequestQueue.enqueue { [weak self] in
+      guard let self else { return }
+      let duration = SpaceTransitionSettings.duration(
+        forGestureSpeed: UserDefaults.standard.double(forKey: "gestureSpeed")
+      )
+      var isSameSpace = false
+      let didSwitch = await self.spaceTransitionOverlay.transition(
+        direction: self.directionForIndex(index),
+        duration: duration,
+        canSwitch: {
+          var info = ISSSpaceInfo()
+          guard iss_get_space_info(&info) else { return true }
+          isSameSpace = info.currentIndex == index
+          return !isSameSpace
+        },
+        switchSpace: { iss_switch_to_index(index) }
+      )
+      self.finishKeyboardSpaceSwitch(didSwitch, beepOnFailure: !isSameSpace)
     }
-    refreshSpaceInfo()
+  }
+
+  private func enqueueKeyboardSpaceSwitch(direction: ISSDirection) {
+    spaceSwitchRequestQueue.enqueue { [weak self] in
+      guard let self else { return }
+      let duration = SpaceTransitionSettings.duration(
+        forGestureSpeed: UserDefaults.standard.double(forKey: "gestureSpeed")
+      )
+      let didSwitch = await self.spaceTransitionOverlay.transition(
+        direction: direction,
+        duration: duration,
+        canSwitch: {
+          var info = ISSSpaceInfo()
+          guard iss_get_space_info(&info) else { return true }
+          return iss_can_move(info, direction)
+        },
+        switchSpace: { iss_switch(direction) }
+      )
+      self.finishKeyboardSpaceSwitch(didSwitch)
+    }
+  }
+
+  private func directionForIndex(_ index: UInt32) -> ISSDirection {
+    var info = ISSSpaceInfo()
+    guard iss_get_space_info(&info) else { return ISSDirectionRight }
+    return index < info.currentIndex ? ISSDirectionLeft : ISSDirectionRight
+  }
+
+  private func finishKeyboardSpaceSwitch(_ didSwitch: Bool, beepOnFailure: Bool = true) {
+    if didSwitch || !beepOnFailure {
+      refreshSpaceInfo()
+    } else {
+      NSSound.beep()
+    }
+
+    if spaceTransitionOverlay.lastCaptureError == .screenRecordingPermissionDenied {
+      ScreenRecordingPermissionAlert.presentOnce()
+    }
   }
 
   private func performSpaceLastSpace() {
