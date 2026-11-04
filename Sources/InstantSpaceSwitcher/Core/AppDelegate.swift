@@ -66,6 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     observeSpaceChanges()
     observeAppActivation()
     refreshSpaceInfo()
+
+    if let appIcon = Bundle.main.image(forResource: "ISS") ?? NSImage(named: "ISS") {
+      NSApp.applicationIconImage = appIcon
+    }
   }
 
   func applicationWillTerminate(_ notification: Notification) {
