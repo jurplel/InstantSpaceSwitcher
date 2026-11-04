@@ -76,6 +76,13 @@ bool iss_window_is_held(CGRect downFrame, CGPoint downCursor,
 bool iss_ax_role_is_drag_area(const char *role, const char *parentRole, double offsetFromTop);
 
 /**
+ * @brief Whether a press this far below a window's top edge is worth checking for a title
+ * bar in the background at mouse-down, so the answer is ready if a switch follows.
+ * Presses lower down are checked only if a switch actually happens.
+ */
+bool iss_should_prefetch_drag_area(double offsetFromTop);
+
+/**
  * @brief Compares an Objective-C method type encoding with a compact signature.
  *
  * Offsets are ignored, so "@32@0:8@16Q24" matches "@@:@Q". Anything beyond plain

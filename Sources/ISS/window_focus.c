@@ -1,15 +1,18 @@
 #include "window_focus.h"
 
 #include <ApplicationServices/ApplicationServices.h>
+#include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <string.h>
 
 #include "include/ISSWindowCarry.h"
 #include "window_drag.h"
 
-// The bridged space operations apply asynchronously; raising before the switch lands
-// would reorder the window on the old space
-static const CFTimeInterval kFocusDelay = 0.05;
+// The bridged space operations apply asynchronously (measured: within ~16 ms); raising before
+// the switch lands would reorder the window on the old space. Raise soon after, then once
+// more as a safety net in case the switch landed late.
+static const CFTimeInterval kFocusDelay = 0.02;
+static const CFTimeInterval kFocusRetryDelay = 0.12;
 static const float kMessagingTimeout = 0.25f;
 // The hit test runs while the user waits for the switch, so keep it short
 static const float kHitTestTimeout = 0.1f;
@@ -20,14 +23,18 @@ static const double kTitleBandHeight = 52.0;
 // (used by most window managers); resolved at runtime so a removal only disables focusing.
 typedef AXError (*AXGetWindowFn)(AXUIElementRef element, uint32_t *outWindowID);
 
+static AXGetWindowFn axGetWindow = NULL;
+
+static void load_ax_get_window(void *context) {
+    (void)context;
+    axGetWindow = (AXGetWindowFn)dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow");
+}
+
+// Also called from the background title-bar check, so resolve exactly once
 static AXGetWindowFn resolve_ax_get_window(void) {
-    static bool resolved = false;
-    static AXGetWindowFn fn = NULL;
-    if (!resolved) {
-        resolved = true;
-        fn = (AXGetWindowFn)dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow");
-    }
-    return fn;
+    static dispatch_once_t once;
+    dispatch_once_f(&once, NULL, load_ax_get_window);
+    return axGetWindow;
 }
 
 static pid_t window_owner_pid(uint32_t windowID) {
@@ -168,11 +175,16 @@ static void focus_timer_fired(CFRunLoopTimerRef timer, void *info) {
     CFRelease(timer);
 }
 
-void iss_focus_window_soon(uint32_t windowID) {
+static void schedule_focus(uint32_t windowID, CFTimeInterval delay) {
     CFRunLoopTimerContext context = {0, (void *)(uintptr_t)windowID, NULL, NULL, NULL};
-    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + kFocusDelay, 0, 0, 0,
+    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + delay, 0, 0, 0,
                                                    focus_timer_fired, &context);
     if (timer) {
         CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
     }
+}
+
+void iss_focus_window_soon(uint32_t windowID) {
+    schedule_focus(windowID, kFocusDelay);
+    schedule_focus(windowID, kFocusRetryDelay);
 }

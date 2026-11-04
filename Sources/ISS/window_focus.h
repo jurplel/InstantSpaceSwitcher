@@ -10,7 +10,8 @@
  *
  * Activating a space directly makes that space's own frontmost app active, so a window
  * carried onto it would otherwise end up behind the space's windows and unfocused.
- * Runs shortly after the call, once the space switch has applied.
+ * Runs shortly after the call, once the space switch has applied, and once more a little
+ * later in case the switch landed late.
  */
 void iss_focus_window_soon(uint32_t windowID);
 

@@ -108,6 +108,16 @@ final class WindowCarryTests: XCTestCase {
     XCTAssertFalse(iss_ax_role_is_drag_area("AXTabGroup", "AXGroup", 20))
   }
 
+  /// The title-bar check runs at mouse-down only for presses near the top of a window.
+  func testPrefetchOnlyNearWindowTop() {
+    XCTAssertTrue(iss_should_prefetch_drag_area(0))
+    XCTAssertTrue(iss_should_prefetch_drag_area(22))
+    XCTAssertTrue(iss_should_prefetch_drag_area(80))
+    XCTAssertFalse(iss_should_prefetch_drag_area(81))
+    XCTAssertFalse(iss_should_prefetch_drag_area(500))
+    XCTAssertFalse(iss_should_prefetch_drag_area(-1))
+  }
+
   // MARK: - Routing
 
   func testCarryOnlyWhenAvailableDraggedAndCarriable() {
