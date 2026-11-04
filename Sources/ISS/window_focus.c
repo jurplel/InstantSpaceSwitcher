@@ -52,6 +52,7 @@ static void focus_window(uint32_t windowID) {
     if (!getWindow || pid <= 0) {
         return;
     }
+    const CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
 
     AXUIElementRef app = AXUIElementCreateApplication(pid);
     if (!app) {
@@ -78,6 +79,7 @@ static void focus_window(uint32_t windowID) {
         CFRelease(windows);
     }
     CFRelease(app);
+    iss_carry_log("raised and focused window %u in %.1f ms", windowID, (CFAbsoluteTimeGetCurrent() - started) * 1000.0);
 }
 
 bool iss_ax_role_is_drag_area(const char *role, const char *parentRole, double offsetFromTop) {
@@ -113,6 +115,7 @@ bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID, double wind
     if (!getWindow) {
         return false;
     }
+    const CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
     AXUIElementRef systemWide = AXUIElementCreateSystemWide();
     if (!systemWide) {
         return false;
@@ -152,9 +155,10 @@ bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID, double wind
     double offsetFromTop = point.y - windowTop;
     bool dragArea = elementWindow == windowID &&
                     iss_ax_role_is_drag_area(role, parentRole[0] ? parentRole : NULL, offsetFromTop);
-    iss_carry_log("press on %s (parent %s) of window %u, %.0f pt below its top: %s", role[0] ? role : "?",
-                  parentRole[0] ? parentRole : "?", elementWindow, offsetFromTop,
-                  dragArea ? "grabs the window" : "does not grab the window");
+    iss_carry_log("press on %s (parent %s) of window %u, %.0f pt below its top: %s (hit test %.1f ms)",
+                  role[0] ? role : "?", parentRole[0] ? parentRole : "?", elementWindow, offsetFromTop,
+                  dragArea ? "grabs the window" : "does not grab the window",
+                  (CFAbsoluteTimeGetCurrent() - started) * 1000.0);
     return dragArea;
 }
 
