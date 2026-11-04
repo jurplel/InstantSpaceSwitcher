@@ -24,8 +24,14 @@ fi
 echo "Creating DMG..."
 rm -f "${DMG_NAME}"
 
+VOLICON_ARGS=()
+if [ -f "Resources/ISS.icns" ]; then
+  VOLICON_ARGS+=(--volicon "Resources/ISS.icns")
+fi
+
 create-dmg \
   --volname "${PRODUCT_NAME}" \
+  "${VOLICON_ARGS[@]}" \
   --window-pos 200 120 \
   --window-size 600 400 \
   --icon-size 100 \
