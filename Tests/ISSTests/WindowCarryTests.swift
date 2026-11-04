@@ -77,18 +77,35 @@ final class WindowCarryTests: XCTestCase {
 
   /// Accessibility roles that grab the window when pressed: frame, toolbar, title text.
   func testDragAreaRoles() {
-    XCTAssertTrue(iss_ax_role_is_drag_area("AXWindow", nil))
-    XCTAssertTrue(iss_ax_role_is_drag_area("AXToolbar", "AXWindow"))
-    XCTAssertTrue(iss_ax_role_is_drag_area("AXStaticText", "AXWindow"))
+    XCTAssertTrue(iss_ax_role_is_drag_area("AXWindow", nil, 10))
+    XCTAssertTrue(iss_ax_role_is_drag_area("AXToolbar", "AXWindow", 30))
+    XCTAssertTrue(iss_ax_role_is_drag_area("AXStaticText", "AXWindow", 12))
   }
 
   /// Content, controls and nested text never grab the window.
   func testNonDragAreaRoles() {
-    XCTAssertFalse(iss_ax_role_is_drag_area("AXTextArea", "AXScrollArea"))
-    XCTAssertFalse(iss_ax_role_is_drag_area("AXButton", "AXToolbar"))
-    XCTAssertFalse(iss_ax_role_is_drag_area("AXStaticText", "AXGroup"))
-    XCTAssertFalse(iss_ax_role_is_drag_area("AXStaticText", nil))
-    XCTAssertFalse(iss_ax_role_is_drag_area(nil, "AXWindow"))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXTextArea", "AXScrollArea", 10))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXButton", "AXToolbar", 10))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXStaticText", "AXGroup", 10))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXStaticText", nil, 10))
+    XCTAssertFalse(iss_ax_role_is_drag_area(nil, "AXWindow", 10))
+  }
+
+  /// Chromium title bars and tab strips (Chrome, Electron) report a generic group near the top.
+  func testChromiumTitleBarGroupIsDragArea() {
+    XCTAssertTrue(iss_ax_role_is_drag_area("AXGroup", "AXGroup", 0))
+    XCTAssertTrue(iss_ax_role_is_drag_area("AXGroup", "AXGroup", 20))
+    XCTAssertTrue(iss_ax_role_is_drag_area("AXGroup", nil, 52))
+  }
+
+  /// Generic groups below the title band, or inside page content, are not.
+  func testGroupsOutsideTitleBandAreNotDragArea() {
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXGroup", "AXGroup", 53))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXGroup", "AXGroup", 400))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXGroup", "AXGroup", -5))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXGroup", "AXScrollArea", 20))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXGroup", "AXWebArea", 20))
+    XCTAssertFalse(iss_ax_role_is_drag_area("AXTabGroup", "AXGroup", 20))
   }
 
   // MARK: - Routing

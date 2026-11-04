@@ -13,6 +13,8 @@ static const CFTimeInterval kFocusDelay = 0.05;
 static const float kMessagingTimeout = 0.25f;
 // The hit test runs while the user waits for the switch, so keep it short
 static const float kHitTestTimeout = 0.1f;
+// Title bar plus tab strip in Chromium-based windows
+static const double kTitleBandHeight = 52.0;
 
 // Maps an Accessibility window to its window server ID. Private but long-standing
 // (used by most window managers); resolved at runtime so a removal only disables focusing.
@@ -78,7 +80,7 @@ static void focus_window(uint32_t windowID) {
     CFRelease(app);
 }
 
-bool iss_ax_role_is_drag_area(const char *role, const char *parentRole) {
+bool iss_ax_role_is_drag_area(const char *role, const char *parentRole, double offsetFromTop) {
     if (!role) {
         return false;
     }
@@ -86,7 +88,13 @@ bool iss_ax_role_is_drag_area(const char *role, const char *parentRole) {
         return true;
     }
     // The title text in the title bar
-    return strcmp(role, "AXStaticText") == 0 && parentRole && strcmp(parentRole, "AXWindow") == 0;
+    if (strcmp(role, "AXStaticText") == 0 && parentRole && strcmp(parentRole, "AXWindow") == 0) {
+        return true;
+    }
+    // Chromium's self-drawn title bar and tab strip background
+    bool inPageContent = parentRole && (strcmp(parentRole, "AXScrollArea") == 0 || strcmp(parentRole, "AXWebArea") == 0);
+    return strcmp(role, "AXGroup") == 0 && !inPageContent && offsetFromTop >= 0.0 &&
+           offsetFromTop <= kTitleBandHeight;
 }
 
 static bool copy_role(AXUIElementRef element, char *buffer, size_t size) {
@@ -100,7 +108,7 @@ static bool copy_role(AXUIElementRef element, char *buffer, size_t size) {
     return ok;
 }
 
-bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID) {
+bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID, double windowTop) {
     AXGetWindowFn getWindow = resolve_ax_get_window();
     if (!getWindow) {
         return false;
@@ -141,9 +149,12 @@ bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID) {
     }
     CFRelease(element);
 
-    bool dragArea = elementWindow == windowID && iss_ax_role_is_drag_area(role, parentRole[0] ? parentRole : NULL);
-    iss_carry_log("press on %s (parent %s) of window %u: %s", role[0] ? role : "?", parentRole[0] ? parentRole : "?",
-                  elementWindow, dragArea ? "grabs the window" : "does not grab the window");
+    double offsetFromTop = point.y - windowTop;
+    bool dragArea = elementWindow == windowID &&
+                    iss_ax_role_is_drag_area(role, parentRole[0] ? parentRole : NULL, offsetFromTop);
+    iss_carry_log("press on %s (parent %s) of window %u, %.0f pt below its top: %s", role[0] ? role : "?",
+                  parentRole[0] ? parentRole : "?", elementWindow, offsetFromTop,
+                  dragArea ? "grabs the window" : "does not grab the window");
     return dragArea;
 }
 

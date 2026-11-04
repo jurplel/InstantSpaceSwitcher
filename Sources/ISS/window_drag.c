@@ -206,7 +206,7 @@ bool iss_drag_current_window(uint32_t *outWindowID) {
 
     // Holding the title bar without moving yet grabs the window too, as it does natively
     if (iss_window_is_held(candidateFrame, candidateCursor, frame, cursor, kHoldSlop) &&
-        iss_point_is_window_drag_area(candidateCursor, candidateWindow)) {
+        iss_point_is_window_drag_area(candidateCursor, candidateWindow, candidateFrame.origin.y)) {
         *outWindowID = candidateWindow;
         return true;
     }
