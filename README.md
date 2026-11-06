@@ -8,9 +8,16 @@ https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 
 - Does not require disabling SIP
 - Uses native macOS spaces
+- Custom space names in the switching overlay and Spaces menu
 - Free
 
 A simple CLI is provided (`InstantSpaceSwitcher.app/Contents/MacOS/ISSCli --help`)
+
+## Custom space names
+
+Open **Settings > Spaces** to name desktops on each display. Names can be up to **512 characters** and are saved automatically. Clear a name to show its number again.
+
+Custom names appear in the switching overlay and Spaces menu. Desktop names in Mission Control stay unchanged.
 
 
 ## Installation
