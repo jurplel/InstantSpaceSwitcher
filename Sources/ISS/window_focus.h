@@ -10,14 +10,16 @@
  *
  * Activating a space directly makes that space's own frontmost app active, so a window
  * carried onto it would otherwise end up behind the space's windows and unfocused.
- * Runs shortly after the call, once the space switch has applied.
+ * Runs shortly after the call, once the space switch has applied, and once more a little
+ * later in case the switch landed late.
  */
 void iss_focus_window_soon(uint32_t windowID);
 
 /**
  * @brief Whether the point is on a part of the given window that drags it (title bar,
  * toolbar background, title text), by Accessibility hit test.
+ * @param windowTop The window's top edge (global coordinates)
  */
-bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID);
+bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID, double windowTop);
 
 #endif /* WINDOW_FOCUS_H */

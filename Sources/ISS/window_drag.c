@@ -1,5 +1,6 @@
 #include "window_drag.h"
 
+#include <dispatch/dispatch.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -15,6 +16,8 @@
 static const double kDragTolerance = 32.0;
 // How far the cursor may wander while a window is held still on its title bar
 static const double kHoldSlop = 4.0;
+// Native title bars with toolbars and Chromium tab strips sit within this band
+static const double kPrefetchBand = 80.0;
 
 static CFMachPortRef mouseTap = NULL;
 static CFRunLoopSourceRef mouseSource = NULL;
@@ -25,13 +28,62 @@ static uint32_t candidateWindow = 0;
 static CGRect candidateFrame;
 static CGPoint candidateCursor;
 
-void iss_carry_log(const char *format, ...) {
-    static int enabled = -1;
-    if (enabled == -1) {
-        const char *value = getenv("ISS_DEBUG_CARRY");
-        enabled = value && strcmp(value, "1") == 0;
+// Title-bar check started in the background at mouse-down. Results are applied on the main
+// queue and only if they belong to the current press (generation).
+static uint64_t pressGeneration = 0;
+static int prefetchedDragArea = -1; // -1 unknown, 0 no, 1 yes
+
+typedef struct {
+    uint64_t generation;
+    CGPoint point;
+    uint32_t windowID;
+    double windowTop;
+    bool dragArea;
+} DragAreaJob;
+
+static void apply_drag_area_job(void *context) {
+    DragAreaJob *job = context;
+    if (job->generation == pressGeneration) {
+        prefetchedDragArea = job->dragArea ? 1 : 0;
     }
-    if (!enabled) {
+    free(job);
+}
+
+static void run_drag_area_job(void *context) {
+    DragAreaJob *job = context;
+    job->dragArea = iss_point_is_window_drag_area(job->point, job->windowID, job->windowTop);
+    dispatch_async_f(dispatch_get_main_queue(), job, apply_drag_area_job);
+}
+
+bool iss_should_prefetch_drag_area(double offsetFromTop) {
+    return offsetFromTop >= 0.0 && offsetFromTop <= kPrefetchBand;
+}
+
+static void prefetch_drag_area(void) {
+    if (!iss_should_prefetch_drag_area(candidateCursor.y - candidateFrame.origin.y)) {
+        return;
+    }
+    DragAreaJob *job = malloc(sizeof(*job));
+    if (!job) {
+        return;
+    }
+    *job = (DragAreaJob){pressGeneration, candidateCursor, candidateWindow, candidateFrame.origin.y, false};
+    dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), job, run_drag_area_job);
+}
+
+static bool carryLogEnabled = false;
+
+static void load_carry_log_setting(void *context) {
+    (void)context;
+    const char *value = getenv("ISS_DEBUG_CARRY");
+    carryLogEnabled = value && strcmp(value, "1") == 0;
+}
+
+void iss_carry_log(const char *format, ...) {
+    // Also called from the background title-bar check, so read the setting exactly once
+    static dispatch_once_t once;
+    dispatch_once_f(&once, NULL, load_carry_log_setting);
+    if (!carryLogEnabled) {
         return;
     }
     va_list args;
@@ -82,6 +134,8 @@ static int window_int(CFDictionaryRef info, CFStringRef key, int fallback) {
 // of another process. Anything else on top (menus, panels, the Dock) means no candidate.
 static void record_candidate(CGPoint point) {
     candidateValid = false;
+    pressGeneration++;
+    prefetchedDragArea = -1;
     CFArrayRef windows = CGWindowListCopyWindowInfo(
         kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
     if (!windows) {
@@ -111,6 +165,9 @@ static void record_candidate(CGPoint point) {
         break;
     }
     CFRelease(windows);
+    if (candidateValid) {
+        prefetch_drag_area();
+    }
 }
 
 static CGEventRef mouseTapCallback(CGEventTapProxy proxy, CGEventType type,
@@ -130,6 +187,8 @@ static CGEventRef mouseTapCallback(CGEventTapProxy proxy, CGEventType type,
         break;
     case kCGEventLeftMouseUp:
         candidateValid = false;
+        pressGeneration++;
+        prefetchedDragArea = -1;
         break;
     default:
         break;
@@ -205,10 +264,18 @@ bool iss_drag_current_window(uint32_t *outWindowID) {
     CFRelease(now);
 
     // Holding the title bar without moving yet grabs the window too, as it does natively
-    if (iss_window_is_held(candidateFrame, candidateCursor, frame, cursor, kHoldSlop) &&
-        iss_point_is_window_drag_area(candidateCursor, candidateWindow)) {
-        *outWindowID = candidateWindow;
-        return true;
+    if (iss_window_is_held(candidateFrame, candidateCursor, frame, cursor, kHoldSlop)) {
+        bool dragArea = false;
+        if (prefetchedDragArea != -1) {
+            dragArea = prefetchedDragArea == 1;
+            iss_carry_log("using the title-bar check from mouse-down: %s", dragArea ? "grabs" : "does not grab");
+        } else {
+            dragArea = iss_point_is_window_drag_area(candidateCursor, candidateWindow, candidateFrame.origin.y);
+        }
+        if (dragArea) {
+            *outWindowID = candidateWindow;
+            return true;
+        }
     }
 
     if (!iss_window_follows_cursor(candidateFrame, candidateCursor, frame, cursor, kDragTolerance)) {

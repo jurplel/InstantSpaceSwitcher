@@ -64,10 +64,23 @@ bool iss_window_is_held(CGRect downFrame, CGPoint downCursor,
 /**
  * @brief Whether an Accessibility hit-test result is a part of a window that drags it:
  * the window frame itself (title bar), its toolbar background, or its title text.
+ *
+ * Chromium-based apps (Chrome, Electron) draw their own title bar and tab strip, which
+ * report only a generic AXGroup; one counts when it is within the window's top band and
+ * not inside page content. Controls (buttons, tabs, fields) report their own roles and
+ * never count.
  * @param role Role of the element under the cursor (e.g. "AXWindow")
  * @param parentRole Role of its parent, or NULL
+ * @param offsetFromTop Distance of the press below the window's top edge, in points
  */
-bool iss_ax_role_is_drag_area(const char *role, const char *parentRole);
+bool iss_ax_role_is_drag_area(const char *role, const char *parentRole, double offsetFromTop);
+
+/**
+ * @brief Whether a press this far below a window's top edge is worth checking for a title
+ * bar in the background at mouse-down, so the answer is ready if a switch follows.
+ * Presses lower down are checked only if a switch actually happens.
+ */
+bool iss_should_prefetch_drag_area(double offsetFromTop);
 
 /**
  * @brief Compares an Objective-C method type encoding with a compact signature.

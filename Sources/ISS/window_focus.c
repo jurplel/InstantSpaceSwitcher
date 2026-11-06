@@ -1,31 +1,40 @@
 #include "window_focus.h"
 
 #include <ApplicationServices/ApplicationServices.h>
+#include <dispatch/dispatch.h>
 #include <dlfcn.h>
 #include <string.h>
 
 #include "include/ISSWindowCarry.h"
 #include "window_drag.h"
 
-// The bridged space operations apply asynchronously; raising before the switch lands
-// would reorder the window on the old space
-static const CFTimeInterval kFocusDelay = 0.05;
+// The bridged space operations apply asynchronously (measured: within ~16 ms); raising before
+// the switch lands would reorder the window on the old space. Raise soon after, then once
+// more as a safety net in case the switch landed late.
+static const CFTimeInterval kFocusDelay = 0.02;
+static const CFTimeInterval kFocusRetryDelay = 0.12;
 static const float kMessagingTimeout = 0.25f;
 // The hit test runs while the user waits for the switch, so keep it short
 static const float kHitTestTimeout = 0.1f;
+// Title bar plus tab strip in Chromium-based windows
+static const double kTitleBandHeight = 52.0;
 
 // Maps an Accessibility window to its window server ID. Private but long-standing
 // (used by most window managers); resolved at runtime so a removal only disables focusing.
 typedef AXError (*AXGetWindowFn)(AXUIElementRef element, uint32_t *outWindowID);
 
+static AXGetWindowFn axGetWindow = NULL;
+
+static void load_ax_get_window(void *context) {
+    (void)context;
+    axGetWindow = (AXGetWindowFn)dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow");
+}
+
+// Also called from the background title-bar check, so resolve exactly once
 static AXGetWindowFn resolve_ax_get_window(void) {
-    static bool resolved = false;
-    static AXGetWindowFn fn = NULL;
-    if (!resolved) {
-        resolved = true;
-        fn = (AXGetWindowFn)dlsym(RTLD_DEFAULT, "_AXUIElementGetWindow");
-    }
-    return fn;
+    static dispatch_once_t once;
+    dispatch_once_f(&once, NULL, load_ax_get_window);
+    return axGetWindow;
 }
 
 static pid_t window_owner_pid(uint32_t windowID) {
@@ -50,6 +59,7 @@ static void focus_window(uint32_t windowID) {
     if (!getWindow || pid <= 0) {
         return;
     }
+    const CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
 
     AXUIElementRef app = AXUIElementCreateApplication(pid);
     if (!app) {
@@ -76,9 +86,10 @@ static void focus_window(uint32_t windowID) {
         CFRelease(windows);
     }
     CFRelease(app);
+    iss_carry_log("raised and focused window %u in %.1f ms", windowID, (CFAbsoluteTimeGetCurrent() - started) * 1000.0);
 }
 
-bool iss_ax_role_is_drag_area(const char *role, const char *parentRole) {
+bool iss_ax_role_is_drag_area(const char *role, const char *parentRole, double offsetFromTop) {
     if (!role) {
         return false;
     }
@@ -86,7 +97,13 @@ bool iss_ax_role_is_drag_area(const char *role, const char *parentRole) {
         return true;
     }
     // The title text in the title bar
-    return strcmp(role, "AXStaticText") == 0 && parentRole && strcmp(parentRole, "AXWindow") == 0;
+    if (strcmp(role, "AXStaticText") == 0 && parentRole && strcmp(parentRole, "AXWindow") == 0) {
+        return true;
+    }
+    // Chromium's self-drawn title bar and tab strip background
+    bool inPageContent = parentRole && (strcmp(parentRole, "AXScrollArea") == 0 || strcmp(parentRole, "AXWebArea") == 0);
+    return strcmp(role, "AXGroup") == 0 && !inPageContent && offsetFromTop >= 0.0 &&
+           offsetFromTop <= kTitleBandHeight;
 }
 
 static bool copy_role(AXUIElementRef element, char *buffer, size_t size) {
@@ -100,11 +117,12 @@ static bool copy_role(AXUIElementRef element, char *buffer, size_t size) {
     return ok;
 }
 
-bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID) {
+bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID, double windowTop) {
     AXGetWindowFn getWindow = resolve_ax_get_window();
     if (!getWindow) {
         return false;
     }
+    const CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
     AXUIElementRef systemWide = AXUIElementCreateSystemWide();
     if (!systemWide) {
         return false;
@@ -141,9 +159,13 @@ bool iss_point_is_window_drag_area(CGPoint point, uint32_t windowID) {
     }
     CFRelease(element);
 
-    bool dragArea = elementWindow == windowID && iss_ax_role_is_drag_area(role, parentRole[0] ? parentRole : NULL);
-    iss_carry_log("press on %s (parent %s) of window %u: %s", role[0] ? role : "?", parentRole[0] ? parentRole : "?",
-                  elementWindow, dragArea ? "grabs the window" : "does not grab the window");
+    double offsetFromTop = point.y - windowTop;
+    bool dragArea = elementWindow == windowID &&
+                    iss_ax_role_is_drag_area(role, parentRole[0] ? parentRole : NULL, offsetFromTop);
+    iss_carry_log("press on %s (parent %s) of window %u, %.0f pt below its top: %s (hit test %.1f ms)",
+                  role[0] ? role : "?", parentRole[0] ? parentRole : "?", elementWindow, offsetFromTop,
+                  dragArea ? "grabs the window" : "does not grab the window",
+                  (CFAbsoluteTimeGetCurrent() - started) * 1000.0);
     return dragArea;
 }
 
@@ -153,11 +175,16 @@ static void focus_timer_fired(CFRunLoopTimerRef timer, void *info) {
     CFRelease(timer);
 }
 
-void iss_focus_window_soon(uint32_t windowID) {
+static void schedule_focus(uint32_t windowID, CFTimeInterval delay) {
     CFRunLoopTimerContext context = {0, (void *)(uintptr_t)windowID, NULL, NULL, NULL};
-    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + kFocusDelay, 0, 0, 0,
+    CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + delay, 0, 0, 0,
                                                    focus_timer_fired, &context);
     if (timer) {
         CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
     }
+}
+
+void iss_focus_window_soon(uint32_t windowID) {
+    schedule_focus(windowID, kFocusDelay);
+    schedule_focus(windowID, kFocusRetryDelay);
 }

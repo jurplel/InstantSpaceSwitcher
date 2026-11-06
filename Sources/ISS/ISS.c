@@ -883,7 +883,10 @@ static ISSCarryResult try_carry_dragged_window(bool byIndex, unsigned int reques
     if (!iss_bridged_available() || !cgs_symbols_available()) {
         return ISSCarryNotApplicable;
     }
-    if (!iss_drag_current_window(&windowID)) {
+    const CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
+    const bool dragged = iss_drag_current_window(&windowID);
+    const CFAbsoluteTime dragChecked = CFAbsoluteTimeGetCurrent();
+    if (!dragged) {
         iss_carry_log("no window drag in progress");
         return ISSCarryNotApplicable;
     }
@@ -982,7 +985,10 @@ static ISSCarryResult try_carry_dragged_window(bool byIndex, unsigned int reques
                     lastGestureTime = CFAbsoluteTimeGetCurrent();
                     set_prediction(displayKey, target);
                     iss_focus_window_soon(windowID);
-                    iss_carry_log("carried window %u from index %u to %u", windowID, currentIndex, target);
+                    CFAbsoluteTime finished = CFAbsoluteTimeGetCurrent();
+                    iss_carry_log("carried window %u from index %u to %u (drag check %.1f ms, then %.1f ms to dispatch "
+                                  "the switch)", windowID, currentIndex, target, (dragChecked - started) * 1000.0,
+                                  (finished - dragChecked) * 1000.0);
                     *outTarget = target;
                     result = ISSCarryDone;
                 } else {
