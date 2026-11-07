@@ -489,8 +489,11 @@ double iss_swipe_progress_for_phase(CGSGesturePhase phase, ISSDirection directio
 }
 
 // The fling on the ended phase is what commits the switch on macOS 27. The payload
-// field is 16.16 fixed point (max ~32767), so the speed setting isn't reused here.
+// field is 16.16 fixed point (max ~32767).
 static const double kModernFlingVelocity = 9999.0;
+// Slower flings animate the switch, so the speed setting applies below this; from
+// here up the switch takes as long as with kModernFlingVelocity.
+static const double kModernAnimatedFlingLimit = 100.0;
 
 // Cached natural scrolling preference; -1 means re-read it
 static int naturalScrolling = -1;
@@ -521,7 +524,7 @@ static double iss_modern_swipe_sign(ISSDirection direction) {
     return naturalScrolling ? sign : -sign;
 }
 
-static bool iss_post_modern_dock_swipe(CGSGesturePhase phase, ISSDirection direction) {
+static bool iss_post_modern_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
     const double sign = iss_modern_swipe_sign(direction);
 
     CGEventRef ev = CGEventCreate(NULL);
@@ -542,7 +545,8 @@ static bool iss_post_modern_dock_swipe(CGSGesturePhase phase, ISSDirection direc
     CGEventSetDoubleValueField(ev, kCGEventGestureSwipePositionX, 0.1);
     // Match FasterSwiper: only the Ended event carries velocity.
     if (phase == kCGSGesturePhaseEnded) {
-        CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, sign * kModernFlingVelocity);
+        const double fling = velocity < kModernAnimatedFlingLimit ? velocity : kModernFlingVelocity;
+        CGEventSetDoubleValueField(ev, kCGEventGestureSwipeVelocityX, sign * fling);
     }
 
     CGEventRef augmented = iss_augment_dock_swipe_event(ev);
@@ -571,7 +575,7 @@ static bool iss_post_modern_dock_swipe(CGSGesturePhase phase, ISSDirection direc
 
 static bool iss_post_dock_swipe(CGSGesturePhase phase, ISSDirection direction, double velocity) {
     if (iss_requires_event_augmentation()) {
-        return iss_post_modern_dock_swipe(phase, direction);
+        return iss_post_modern_dock_swipe(phase, direction, velocity);
     }
 
     const bool isRight = (direction == ISSDirectionRight);
