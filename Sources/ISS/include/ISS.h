@@ -64,6 +64,14 @@ bool iss_can_move(ISSSpaceInfo info, ISSDirection direction);
 bool iss_switch_to_index(unsigned int targetIndex);
 
 /**
+ * @brief Finds the space index of a window on the display where the cursor is located.
+ * @param windowID The CGWindowID of the window.
+ * @param outIndex Output pointer that receives the zero-based space index.
+ * @return true if the window lives on exactly one space of that display.
+ */
+bool iss_get_window_space_index(uint32_t windowID, unsigned int *outIndex);
+
+/**
  * @brief Enables or disables interception of trackpad horizontal swipe gestures.
  *
  * When enabled, native horizontal dock-swipe gestures are suppressed and
