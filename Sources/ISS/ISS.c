@@ -58,6 +58,7 @@ extern CFArrayRef CGSCopyManagedDisplaySpaces(CGSConnectionID connection, CFStri
 extern CFStringRef CGSCopyActiveMenuBarDisplayIdentifier(CGSConnectionID connection) __attribute__((weak_import));
 extern CGSConnectionID CGSMainConnectionID(void) __attribute__((weak_import));
 extern CGSSpaceID CGSGetActiveSpace(CGSConnectionID connection) __attribute__((weak_import));
+extern CFArrayRef CGSCopySpacesForWindows(CGSConnectionID connection, int mask, CFArrayRef windowIDs) __attribute__((weak_import));
 
 static CFMachPortRef globalTap = NULL;
 static CFRunLoopSourceRef globalSource = NULL;
@@ -829,6 +830,90 @@ bool iss_switch_to_index(unsigned int targetIndex) {
     set_prediction(info.displayID, targetIndex);
     if (switchCallback) { switchCallback(targetIndex); }
     return !outOfBounds;
+}
+
+bool iss_get_window_space_index(uint32_t windowID, unsigned int *outIndex) {
+    if (!outIndex || !cgs_symbols_available() || &CGSCopySpacesForWindows == NULL) {
+        return false;
+    }
+
+    ISSSpaceInfo info;
+    if (!iss_get_space_info(&info)) {
+        return false;
+    }
+
+    CGSConnectionID connection = CGSMainConnectionID();
+    CFNumberRef windowNumber = CFNumberCreate(NULL, kCFNumberSInt32Type, &windowID);
+    CFArrayRef windows = CFArrayCreate(NULL, (const void **)&windowNumber, 1, &kCFTypeArrayCallBacks);
+    CFRelease(windowNumber);
+    // 0x7: current, other and user spaces
+    CFArrayRef windowSpaces = CGSCopySpacesForWindows(connection, 0x7, windows);
+    CFRelease(windows);
+    if (!windowSpaces) {
+        return false;
+    }
+
+    // A window on several spaces is "on all desktops", so there is nowhere to switch to
+    CGSSpaceID target = 0;
+    if (CFArrayGetCount(windowSpaces) == 1) {
+        CFNumberRef spaceNumber = (CFNumberRef)CFArrayGetValueAtIndex(windowSpaces, 0);
+        if (spaceNumber && CFGetTypeID(spaceNumber) == CFNumberGetTypeID()) {
+            CFNumberGetValue(spaceNumber, kCFNumberSInt64Type, &target);
+        }
+    }
+    CFRelease(windowSpaces);
+    if (target == 0) {
+        return false;
+    }
+
+    CFArrayRef displays = CGSCopyManagedDisplaySpaces(connection, NULL);
+    if (!displays) {
+        return false;
+    }
+
+    bool found = false;
+    CFStringRef displayID = CFStringCreateWithCString(NULL, info.displayID, kCFStringEncodingUTF8);
+    for (CFIndex d = 0; d < CFArrayGetCount(displays) && !found; d++) {
+        CFDictionaryRef displayDict = (CFDictionaryRef)CFArrayGetValueAtIndex(displays, d);
+        if (!displayDict || CFGetTypeID(displayDict) != CFDictionaryGetTypeID()) {
+            continue;
+        }
+        // iss_switch_to_index works on the cursor display only, so skip spaces of other displays
+        CFStringRef identifier = (CFStringRef)CFDictionaryGetValue(displayDict, CFSTR("Display Identifier"));
+        if (!identifier || !displayID || !CFEqual(identifier, displayID)) {
+            continue;
+        }
+        CFArrayRef spaces = (CFArrayRef)CFDictionaryGetValue(displayDict, CFSTR("Spaces"));
+        if (!spaces || CFGetTypeID(spaces) != CFArrayGetTypeID()) {
+            continue;
+        }
+        // Count the same way as extract_space_info_from_display so the index matches
+        unsigned int index = 0;
+        for (CFIndex i = 0; i < CFArrayGetCount(spaces); i++) {
+            CFDictionaryRef spaceDict = (CFDictionaryRef)CFArrayGetValueAtIndex(spaces, i);
+            if (!spaceDict || CFGetTypeID(spaceDict) != CFDictionaryGetTypeID()) {
+                continue;
+            }
+            CFNumberRef idNumber = (CFNumberRef)CFDictionaryGetValue(spaceDict, CFSTR("id64"));
+            CGSSpaceID candidate = 0;
+            if (!idNumber || CFGetTypeID(idNumber) != CFNumberGetTypeID() ||
+                !CFNumberGetValue(idNumber, kCFNumberSInt64Type, &candidate)) {
+                continue;
+            }
+            if (candidate == target) {
+                *outIndex = index;
+                found = true;
+                break;
+            }
+            index++;
+        }
+    }
+
+    if (displayID) {
+        CFRelease(displayID);
+    }
+    CFRelease(displays);
+    return found;
 }
 
 void iss_set_swipe_override(bool enabled) {

@@ -12,6 +12,27 @@ https://github.com/user-attachments/assets/037422c9-3fb7-41cd-8da7-58d28c4c8eff
 
 A simple CLI is provided (`InstantSpaceSwitcher.app/Contents/MacOS/ISSCli --help`)
 
+### Instant app switching (Raycast, Alfred, skhd, ...)
+
+When a launcher activates an app whose window is on another space, macOS slides over with the animation.
+`ISSCli focus <app name>` jumps instantly to the space of the app's front window first, then activates the app:
+
+```sh
+/Applications/InstantSpaceSwitcher.app/Contents/MacOS/ISSCli focus "Google Chrome"
+```
+
+For Raycast, save this as a [Script Command](https://github.com/raycast/script-commands) and give it a hotkey instead of the built-in "Open Application" one:
+
+```sh
+#!/bin/bash
+# @raycast.schemaVersion 1
+# @raycast.title Focus Chrome
+# @raycast.mode silent
+/Applications/InstantSpaceSwitcher.app/Contents/MacOS/ISSCli focus "Google Chrome"
+```
+
+Windows on another display or on all desktops activate the normal way, and apps that are not running are launched.
+
 
 ## Installation
 
