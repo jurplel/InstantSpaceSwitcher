@@ -21,6 +21,8 @@ When a launcher activates an app whose window is on another space, macOS slides 
 /Applications/InstantSpaceSwitcher.app/Contents/MacOS/ISSCli focus "Google Chrome"
 ```
 
+Add `--toggle` to hide the app instead when it is already in front, like Raycast's "Toggle Visibility" hotkey action.
+
 For Raycast, save this as a [Script Command](https://github.com/raycast/script-commands) and give it a hotkey instead of the built-in "Open Application" one:
 
 ```sh
@@ -28,7 +30,7 @@ For Raycast, save this as a [Script Command](https://github.com/raycast/script-c
 # @raycast.schemaVersion 1
 # @raycast.title Focus Chrome
 # @raycast.mode silent
-/Applications/InstantSpaceSwitcher.app/Contents/MacOS/ISSCli focus "Google Chrome"
+/Applications/InstantSpaceSwitcher.app/Contents/MacOS/ISSCli focus "Google Chrome" --toggle
 ```
 
 Windows on another display or on all desktops activate the normal way, and apps that are not running are launched.
