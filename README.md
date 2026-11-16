@@ -33,7 +33,7 @@ For Raycast, save this as a [Script Command](https://github.com/raycast/script-c
 /Applications/InstantSpaceSwitcher.app/Contents/MacOS/ISSCli focus "Google Chrome" --toggle
 ```
 
-Windows on another display or on all desktops activate the normal way, and apps that are not running are launched.
+Windows on another display or on all desktops activate the normal way, and apps that are not running are launched. Apps that ignore activation through the Accessibility API (e.g. Spark) are activated with `open -a` after the switch, which is a little slower but still instant.
 
 
 ## Installation
