@@ -104,7 +104,11 @@ static int focus_app(const char *appName, bool toggle) {
     }
     iss_destroy();
     if (pid != 0 && set_app_flag(pid, kAXFrontmostAttribute)) {
-        return 0;
+        // Some apps (e.g. Spark) report success but stay in the background, so check before trusting it
+        for (int i = 0; i < 5; i++) {
+            if (is_frontmost(pid)) return 0;
+            usleep(20000);
+        }
     }
 
     // Not running, or no window to find it by: let LaunchServices launch or activate it
