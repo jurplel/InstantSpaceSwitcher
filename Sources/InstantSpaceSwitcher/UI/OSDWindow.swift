@@ -28,8 +28,14 @@ final class OSDWindow {
 
     label.stringValue = message
 
+    // Scale in even steps from the default (medium) size
+    let sizeStep = CGFloat((UserDefaults.standard.object(forKey: "osdSize") as? Int ?? 1) - 1)
+    let windowSize = 140 + 30 * sizeStep
+    label.font = NSFont.systemFont(ofSize: 48 + 20 * sizeStep, weight: .medium)
+    window.contentView?.layer?.cornerRadius = 18 + 4 * sizeStep
+    window.setContentSize(NSSize(width: windowSize, height: windowSize))
+
     // Position on cursor's screen
-    let windowSize: CGFloat = 140
     let mouseLocation = NSEvent.mouseLocation
     let screen =
       NSScreen.screens.first(where: { $0.frame.contains(mouseLocation) }) ?? NSScreen.main
