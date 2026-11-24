@@ -12,7 +12,7 @@ final class GeneralSettingsViewController: NSViewController {
   private let showOSDInMissionControlCheckbox = NSButton(
     checkboxWithTitle: "Show on-screen display in Mission Control", target: nil, action: nil)
   private let animateOSDCheckbox = NSButton(
-    checkboxWithTitle: "Slide in from the direction of the switch", target: nil, action: nil)
+    checkboxWithTitle: "Slide in animation", target: nil, action: nil)
   private let swipeOverrideCheckbox = NSButton(
     checkboxWithTitle: "Override swipe gesture", target: nil, action: nil)
   private let animationSpeedPopup = NSPopUpButton()
@@ -83,7 +83,7 @@ final class GeneralSettingsViewController: NSViewController {
       ])
     experimentalTitle.append(sublabel)
     overlayDetectionCheckbox.attributedTitle = experimentalTitle
-    
+
     formView.addRow(label: nil, control: overlayDetectionCheckbox)
     formView.addSectionSpacing()
 
@@ -96,14 +96,14 @@ final class GeneralSettingsViewController: NSViewController {
     let osdLabel = NSTextField(labelWithString: "On-Screen Display:")
     showOSDCheckbox.title = "Show for"
     showOSDInMissionControlCheckbox.title = "Show in Mission Control"
-    
+
     let osdContainer = NSStackView()
     osdContainer.orientation = .horizontal
     osdContainer.spacing = 8
     osdContainer.addArrangedSubview(showOSDCheckbox)
     osdContainer.addArrangedSubview(osdDurationPopup)
     osdContainer.addArrangedSubview(NSTextField(labelWithString: "when switching spaces"))
-    
+
     formView.addRow(label: osdLabel, control: osdContainer)
     formView.addRow(label: nil, control: showOSDInMissionControlCheckbox)
     formView.addRow(label: nil, control: animateOSDCheckbox)
