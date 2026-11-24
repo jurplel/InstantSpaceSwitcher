@@ -6,10 +6,21 @@ final class OSDWindow {
   private var window: NSWindow?
   private var label: NSTextField?
   private var hideTimer: Timer?
+  private var lastSpaceIndex: UInt32?
+
+  // Slide distance and share of the display duration spent fading in/out
+  private let slideDistance: CGFloat = 80
+  private let fadeInShare = 0.45
+  private let fadeOutShare = 0.15
 
   private init() {}
 
-  func show(message: String) {
+  // Track space changes made outside the app so the slide direction stays correct
+  func noteCurrentSpace(_ index: UInt32) {
+    lastSpaceIndex = index
+  }
+
+  func show(spaceIndex: UInt32) {
     guard UserDefaults.standard.bool(forKey: "showOSD") else { return }
     // Mission Control OSD suppression requires overlay detection enabled
     let overlayDetectionEnabled = UserDefaults.standard.bool(forKey: "overlayDetectionEnabled")
@@ -26,7 +37,14 @@ final class OSDWindow {
 
     guard let window = window, let label = label else { return }
 
-    label.stringValue = message
+    label.stringValue = "\(spaceIndex + 1)"
+
+    // Enter from the side we are switching towards, like the space itself
+    var slideOffset: CGFloat = 0
+    if let lastSpaceIndex = lastSpaceIndex, lastSpaceIndex != spaceIndex {
+      slideOffset = spaceIndex > lastSpaceIndex ? slideDistance : -slideDistance
+    }
+    lastSpaceIndex = spaceIndex
 
     // Position on cursor's screen
     let windowSize: CGFloat = 140
@@ -40,13 +58,30 @@ final class OSDWindow {
       window.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
-    window.alphaValue = 1.0
-    window.orderFrontRegardless()
-
     let durationMs = UserDefaults.standard.object(forKey: "osdDurationMs") as? Int ?? 500
     let duration = Double(durationMs) / 1000.0
+    let animated = UserDefaults.standard.bool(forKey: "animateOSD")
+
+    if animated {
+      let finalFrame = window.frame
+      window.setFrame(finalFrame.offsetBy(dx: slideOffset, dy: 0), display: false)
+      window.alphaValue = 0.0
+      window.orderFrontRegardless()
+
+      NSAnimationContext.runAnimationGroup({ context in
+        context.duration = duration * fadeInShare
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        window.animator().setFrame(finalFrame, display: true)
+        window.animator().alphaValue = 1.0
+      })
+    } else {
+      window.alphaValue = 1.0
+      window.orderFrontRegardless()
+    }
+
+    let fadeOut = animated ? duration * fadeOutShare : 0.2
     hideTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
-      self?.hide()
+      self?.hide(over: fadeOut)
     }
   }
 
@@ -98,9 +133,9 @@ final class OSDWindow {
     self.label = label
   }
 
-  private func hide() {
+  private func hide(over duration: TimeInterval) {
     NSAnimationContext.runAnimationGroup({ context in
-      context.duration = 0.2
+      context.duration = duration
       window?.animator().alphaValue = 0.0
     })
   }
