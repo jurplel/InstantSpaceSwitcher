@@ -7,6 +7,7 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Show on-screen display when switching spaces", target: nil, action: nil)
   private let osdDurationPopup = NSPopUpButton()
   private let osdDurationLabel = NSTextField(labelWithString: "Duration:")
+  private let osdSizePopup = NSPopUpButton()
   private let overlayDetectionCheckbox = NSButton(
     checkboxWithTitle: "Enable Mission Control/Exposé detection (experimental)", target: nil, action: nil)
   private let showOSDInMissionControlCheckbox = NSButton(
@@ -21,6 +22,7 @@ final class GeneralSettingsViewController: NSViewController {
     checkboxWithTitle: "Hide menu bar icon", target: nil, action: nil)
 
   private let durationPresets = [100, 200, 300, 500, 750, 1000]
+  private let osdSizeOptions = ["Small", "Medium", "Large", "Very Large"]
   private let animationSpeedOptions = ["Normal", "Fast", "Faster", "Fastest", "Instant"]
   private let animationSpeedValues: [Double] = [40.0, 50.0, 60.0, 80.0, 2000.0]
 
@@ -47,6 +49,8 @@ final class GeneralSettingsViewController: NSViewController {
     showOSDCheckbox.action = #selector(showOSDChanged)
     osdDurationPopup.target = self
     osdDurationPopup.action = #selector(osdDurationChanged)
+    osdSizePopup.target = self
+    osdSizePopup.action = #selector(osdSizeChanged)
     overlayDetectionCheckbox.target = self
     overlayDetectionCheckbox.action = #selector(overlayDetectionChanged)
     showOSDInMissionControlCheckbox.target = self
@@ -62,6 +66,7 @@ final class GeneralSettingsViewController: NSViewController {
 
     // Populate data
     for duration in durationPresets { osdDurationPopup.addItem(withTitle: "\(duration)ms") }
+    for size in osdSizeOptions { osdSizePopup.addItem(withTitle: size) }
     for speed in animationSpeedOptions { animationSpeedPopup.addItem(withTitle: speed) }
 
     // System
@@ -100,7 +105,14 @@ final class GeneralSettingsViewController: NSViewController {
     osdContainer.addArrangedSubview(osdDurationPopup)
     osdContainer.addArrangedSubview(NSTextField(labelWithString: "when switching spaces"))
     
+    let osdSizeContainer = NSStackView()
+    osdSizeContainer.orientation = .horizontal
+    osdSizeContainer.spacing = 8
+    osdSizeContainer.addArrangedSubview(NSTextField(labelWithString: "Size:"))
+    osdSizeContainer.addArrangedSubview(osdSizePopup)
+
     formView.addRow(label: osdLabel, control: osdContainer)
+    formView.addRow(label: nil, control: osdSizeContainer)
     formView.addRow(label: nil, control: showOSDInMissionControlCheckbox)
   }
 
@@ -116,6 +128,8 @@ final class GeneralSettingsViewController: NSViewController {
     }
 
     osdDurationPopup.isEnabled = showOSD
+    osdSizePopup.selectItem(at: defaults.object(forKey: "osdSize") as? Int ?? 1)
+    osdSizePopup.isEnabled = showOSD
     overlayDetectionCheckbox.state = defaults.object(forKey: "overlayDetectionEnabled") as? Bool ?? true ? .on : .off
     let overlayDetectionEnabled = overlayDetectionCheckbox.state == .on
     showOSDInMissionControlCheckbox.isEnabled = showOSD && overlayDetectionEnabled
@@ -142,6 +156,7 @@ final class GeneralSettingsViewController: NSViewController {
     let isEnabled = sender.state == .on
     defaults.set(isEnabled, forKey: "showOSD")
     osdDurationPopup.isEnabled = isEnabled
+    osdSizePopup.isEnabled = isEnabled
     let overlayDetectionEnabled = overlayDetectionCheckbox.state == .on
     showOSDInMissionControlCheckbox.isEnabled = isEnabled && overlayDetectionEnabled
   }
@@ -163,6 +178,12 @@ final class GeneralSettingsViewController: NSViewController {
     guard index >= 0 && index < durationPresets.count else { return }
     let duration = durationPresets[index]
     defaults.set(duration, forKey: "osdDurationMs")
+  }
+
+  @objc private func osdSizeChanged(_ sender: NSPopUpButton) {
+    let index = sender.indexOfSelectedItem
+    guard index >= 0 && index < osdSizeOptions.count else { return }
+    defaults.set(index, forKey: "osdSize")
   }
 
   @objc private func swipeOverrideChanged(_ sender: NSButton) {
